@@ -170,6 +170,7 @@ static void fragment_bin_get(fragment_t *fragment, uint8_t * dst) {
                 *dst = x86_fragment->param.i + OPCODE_LAST_;
                 break;
             }
+            /* fall through */
         case OPCODE_RUNTIME_WORD:
         case OPCODE_PUSH_LITERAL:
         case OPCODE_PUSH_DATA_ADDRESS:

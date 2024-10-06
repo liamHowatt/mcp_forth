@@ -88,6 +88,7 @@ static const nstring_t builtins[] = {
     NSTRING_LITERAL("max"),
     NSTRING_LITERAL("fill"),
     NSTRING_LITERAL("2drop"),
+    NSTRING_LITERAL("move"),
 };
 
 static bool next_word(source_scanner_t * ss)
@@ -269,15 +270,45 @@ static bool parse_literal(int * literal_out, const char * word, int word_len)
         return false;
     }
     long long num = 0;
-    for( ; i < word_len; i++) {
-        if(word[i] < '0' || word[i] > '9') {
+    /* hex */
+    if(word[i] == '0' && i + 1 < word_len && word[i + 1] == 'x') {
+        i += 2;
+        if(i >= word_len) {
             return false;
         }
-        num *= 10ll;
-        long long new_digit = word[i] - '0';
-        num += new_digit;
-        if(num > ((long long) UINT_MAX)) {
-            return false;
+        for( ; i < word_len; i++) {
+            long long new_digit;
+            if(word[i] >= '0' && word[i] <= '9') {
+                new_digit = word[i] - '0';
+            }
+            else if(word[i] >= 'a' && word[i] <= 'f') {
+                new_digit = word[i] - 'a' + 10;
+            }
+            else if(word[i] >= 'A' && word[i] <= 'F') {
+                new_digit = word[i] - 'A' + 10;
+            }
+            else {
+                return false;
+            }
+            num *= 16ll;
+            num += new_digit;
+            if(num > ((long long) UINT_MAX)) {
+                return false;
+            }
+        }
+    }
+    /* decimal */
+    else {
+        for( ; i < word_len; i++) {
+            if(word[i] < '0' || word[i] > '9') {
+                return false;
+            }
+            num *= 10ll;
+            long long new_digit = word[i] - '0';
+            num += new_digit;
+            if(num > ((long long) UINT_MAX)) {
+                return false;
+            }
         }
     }
     if(negative) {

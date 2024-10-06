@@ -1,0 +1,41 @@
+cmake_minimum_required(VERSION 3.28)
+
+project(lvgl_workspace LANGUAGES C CXX)
+
+include(${CMAKE_CURRENT_LIST_DIR}/../lvgl/CMakeLists.txt)
+include_directories(${CMAKE_CURRENT_LIST_DIR})
+include_directories(${CMAKE_CURRENT_LIST_DIR}/..) # lvgl/lvgl.h
+include_directories(${CMAKE_CURRENT_LIST_DIR}/../../..) # mcp_forth.h
+
+add_executable(lvgl_workspace
+    main.c
+    mouse_cursor_icon.c
+    lvgl_forth_runtime.c
+    ../../../compile.c
+    ../../../vm_backend.c
+    ../../../execute.c
+    ../../../vm_engine.c
+    ../../../num.c
+)
+
+# 32 bit
+set_target_properties(lvgl_workspace PROPERTIES COMPILE_OPTIONS "-m32" LINK_FLAGS "-m32")
+
+set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32 -g -Wall -Wextra -fsanitize=address -Wno-unused-parameter")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32 -g -Wall -Wextra -fsanitize=address -Wno-unused-parameter")
+set (CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS} -m32 -fsanitize=address -Wno-unused-parameter")
+
+target_link_libraries(lvgl_workspace lvgl)
+target_link_libraries(lvgl_workspace pthread)
+target_link_libraries(lvgl_workspace SDL2)
+target_link_libraries(lvgl_workspace m)
+# target_link_libraries(lvgl_workspace lvgl_thorvg)
+# target_link_libraries(lvgl_workspace lvgl_examples)
+# target_link_libraries(lvgl_workspace lvgl_demos)
+# target_link_libraries(lvgl_workspace jpeg)
+# target_link_libraries(lvgl_workspace png)
+
+# target_link_libraries(lvgl_workspace GL)
+# target_link_libraries(lvgl_workspace GLEW)
+# target_link_libraries(lvgl_workspace glfw)
+# target_link_libraries(lvgl_workspace assimp)

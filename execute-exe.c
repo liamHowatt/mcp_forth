@@ -4,83 +4,81 @@
 #include <termios.h>
 #include <time.h>
 
-#define ARRAY_LEN(arr) (sizeof(arr) / sizeof(*(arr)))
-
-static void rt_type(int ** stack, int stack_max, int * stack_len)
+static int rt_type(void * ctx, stack_t * stack)
 {
-    assert(*stack_len >= 2);
-    fwrite((void *)(*stack)[-2], 1, (*stack)[-1], stdout);
+    if(!(stack->len >= 2)) return STACK_UNDERFLOW_ERROR;
+    fwrite((void *)stack->data[-2], 1, stack->data[-1], stdout);
     fflush(stdout);
-    *stack -= 2;
-    *stack_len -= 2;
+    stack->data -= 2;
+    stack->len -= 2;
+    return 0;
 }
 
-static void rt_cr(int ** stack, int stack_max, int * stack_len)
+static int rt_cr(void * ctx, stack_t * stack)
 {
     puts("");
+    return 0;
 }
 
-static void rt_dot(int ** stack, int stack_max, int * stack_len)
+static int rt_dot(void * ctx, stack_t * stack)
 {
-    assert(*stack_len >= 1);
-    printf("%d ", (*stack)[-1]);
+    if(!(stack->len >= 1)) return STACK_UNDERFLOW_ERROR;
+    printf("%d ", stack->data[-1]);
     fflush(stdout);
-    *stack -= 1;
-    *stack_len -= 1;
+    stack->data -= 1;
+    stack->len -= 1;
+    return 0;
 }
 
-static void rt_key(int ** stack, int stack_max, int * stack_len)
+static int rt_key(void * ctx, stack_t * stack)
 {
-    assert(*stack_len < stack_max);
+    if(!(stack->len < stack->max)) return STACK_UNDERFLOW_ERROR;
     int c = getchar();
     if(c == EOF) exit(1);
-    **stack = c;
-    *stack += 1;
-    *stack_len += 1;
+    *stack->data = c;
+    stack->data += 1;
+    stack->len += 1;
+    return 0;
 }
 
-static void rt_emit(int ** stack, int stack_max, int * stack_len)
+static int rt_emit(void * ctx, stack_t * stack)
 {
-    assert(*stack_len >= 1);
-    putchar((*stack)[-1]);
+    if(!(stack->len >= 1)) return STACK_UNDERFLOW_ERROR;
+    putchar(stack->data[-1]);
     fflush(stdout);
-    *stack -= 1;
-    *stack_len -= 1;
+    stack->data -= 1;
+    stack->len -= 1;
+    return 0;
 }
 
-static void rt_ms(int ** stack, int stack_max, int * stack_len)
+static int rt_ms(void * ctx, stack_t * stack)
 {
-    assert(*stack_len >= 1);
-    *stack -= 1;
-    *stack_len -= 1;
-    unsigned long long ms = **stack;
+    if(!(stack->len >= 1)) return STACK_UNDERFLOW_ERROR;
+    stack->data -= 1;
+    stack->len -= 1;
+    unsigned long long ms = *stack->data;
     unsigned long long sec = ms / 1000ull;
     unsigned long long ms_no_sec = ms % 1000ull;
     unsigned long long ns_no_sec = ms_no_sec * 1000000ull;
     struct timespec tspec = {.tv_sec=sec, .tv_nsec=ns_no_sec};
     int res = nanosleep(&tspec, NULL);
     assert(res == 0);
+    return 0;
 }
 
-static const struct {const char * name; runtime_cb cb;} rt_cbs[] = {
+static const runtime_cb_array_t runtime_cb_array[] = {
     {"type", rt_type},
     {"cr", rt_cr},
     {".", rt_dot},
     {"key", rt_key},
     {"emit", rt_emit},
     {"ms", rt_ms},
+    {NULL, NULL},
 };
 
-static runtime_cb get_runtime_cb(const char * name)
-{
-    for(int i=0; i<ARRAY_LEN(rt_cbs); i++) {
-        if(0 == strcmp(name, rt_cbs[i].name)) {
-            return rt_cbs[i].cb;
-        }
-    }
-    fprintf(stderr, "no runtime word for \"%s\"\n", name);
-    exit(1);
-}
+static const runtime_t exe_runtime = {
+    .runtime_cb_array=runtime_cb_array
+};
 
 int main(int argc, char ** argv)
 {
@@ -119,8 +117,11 @@ int main(int argc, char ** argv)
     //     res = tcsetattr(STDIN_FILENO, TCSANOW, &t); assert(res == 0);
     // }
 
-    res = mcp_forth_execute(bin, bin_len, get_runtime_cb, engine);
-
+    const char * missing_word;
+    res = mcp_forth_execute(bin, bin_len, &exe_runtime, NULL, engine, &missing_word);
+    if(res == RUNTIME_WORD_MISSING_ERROR) {
+        fprintf(stderr, "runtime word \"%s\" missing\n", missing_word);
+    }
     free(bin);
 
     if(res) {

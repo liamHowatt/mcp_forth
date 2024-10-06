@@ -50,6 +50,7 @@ static int fragment_bin_size(fragment_t * fragment) {
             if(vm_fragment->param.i <= NUM_MAX_ONE_BYTE - OPCODE_LAST_) {
                 return 1;
             }
+            /* fall through */
         case OPCODE_RUNTIME_WORD:
         case OPCODE_PUSH_LITERAL:
         case OPCODE_PUSH_DATA_ADDRESS:
@@ -84,6 +85,7 @@ static void fragment_bin_get(fragment_t *fragment, uint8_t * dst) {
                 *dst = vm_fragment->param.i + OPCODE_LAST_;
                 break;
             }
+            /* fall through */
         case OPCODE_RUNTIME_WORD:
         case OPCODE_PUSH_LITERAL:
         case OPCODE_PUSH_DATA_ADDRESS:

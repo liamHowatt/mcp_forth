@@ -8,6 +8,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#define RUNTIME_WORD_MISSING_ERROR 1000
+
+#define STACK_UNDERFLOW_ERROR           1
+#define STACK_OVERFLOW_ERROR            2
+#define RETURN_STACK_OVERFLOW_ERROR     3
+#define OUT_OF_MEMORY_ERROR             4
+
 typedef enum {
     OPCODE_BUILTIN_WORD,
     OPCODE_DEFINED_WORD,
@@ -55,13 +62,20 @@ int num_encoded_size_from_encoded(const uint8_t * src);
 int num_decode(const uint8_t * src);
 #define NUM_MAX_ONE_BYTE 63
 
-typedef void (*runtime_cb)(int ** stack, int stack_max, int * stack_len);
+typedef struct {int * data; int max; int len; } stack_t;
+typedef int (*runtime_cb)(void * runtime_ctx_t, stack_t * stack);
+typedef struct {const char * name; runtime_cb cb;} runtime_cb_array_t;
+
+typedef struct {
+    const runtime_cb_array_t * runtime_cb_array;
+} runtime_t;
 
 typedef struct {
     int (*run)(
         const uint8_t * program_start,
         const uint8_t * data_start,
         runtime_cb * runtime_cbs,
+        void * runtime_ctx,
         int variable_count
     );
 } mcp_forth_engine_t;
@@ -71,6 +85,8 @@ extern const mcp_forth_engine_t compact_bytecode_vm_engine;
 int mcp_forth_execute(
     const uint8_t * bin,
     int bin_len,
-    runtime_cb (*get_runtime_cb)(const char *),
-    const mcp_forth_engine_t * engine
+    const runtime_t * runtime,
+    void * runtime_ctx,
+    const mcp_forth_engine_t * engine,
+    const char ** missing_word
 );

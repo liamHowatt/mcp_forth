@@ -1,4 +1,6 @@
-`gcc-multilib` needs to be installed to compile `execute-exe` as 32 bit.
+# mcp_forth
+
+`gcc-multilib` needs to be installed (unless OS is 32 bit) to compile `execute-exe` as 32 bit.
 
 ```sh
 make

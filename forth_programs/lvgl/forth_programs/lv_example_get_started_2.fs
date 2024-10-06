@@ -21,6 +21,9 @@ variable sbuf                        \ define `sbuf`. It marks the beginning of 
 \ </string boilerplate>
 
 
+: NULL 0 ;
+
+
 : btn_event_cb ( e -- )
     dup lv_event_get_code           \ duplicate e and pass it
     over lv_event_get_target        \ go over the code to get e
@@ -38,7 +41,7 @@ variable sbuf                        \ define `sbuf`. It marks the beginning of 
 lv_screen_active lv_button_create
 dup 10 10 lv_obj_set_pos
 dup 120 50 lv_obj_set_size
-dup ' btn_event_cb create_c_cb LV_EVENT_ALL NULL lv_obj_add_event_cb
+dup ' btn_event_cb LV_EVENT_ALL NULL lv_obj_add_event_cb drop
 
 dup lv_label_create
 dup s" Button" null-term lv_label_set_text

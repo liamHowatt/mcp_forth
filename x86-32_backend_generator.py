@@ -1,6 +1,10 @@
 from subprocess import check_output, check_call
 import sys
 
+# ; 2drop
+# mov eax, [ebx-4]
+# sub ebx, 8
+
 builtins = (
       ("dup", """
 add ebx, 4
@@ -103,11 +107,7 @@ sub ebx, 4
 
 
 
-"""), # ("2drop", """
-# mov eax, [ebx-4]
-# sub ebx, 8
-
-# """)
+""")
 )
 
 def mktemp():

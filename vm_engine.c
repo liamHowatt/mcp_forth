@@ -4,18 +4,12 @@
 #define RETURN_STKSZ 1000
 #define MEMSZ 4000
 
-#define STACK_UNDERFLOW_ERROR           1
-#define STACK_OVERFLOW_ERROR            2
-#define RETURN_STACK_OVERFLOW_ERROR     3
-#define OUT_OF_MEMORY_ERROR             4
-#define STACK_NOT_DEEP_ENOUGH_ERROR     5
-
 #define RASSERT(expr, ecode) do { if(!(expr)) { ret=(ecode); goto end_label; } } while(0)
 
-#define POP(var)  if((ret = pop(&var, &stack, &stackl))) goto end_label
-#define PUSH(var) if((ret = push(var, &stack, &stackl))) goto end_label
-#define RETURN_POP(var)  if((ret = pop((int *) &var, &return_stack, &return_stackl))) goto end_label
-#define RETURN_PUSH(var) if((ret = push((int) var, &return_stack, &return_stackl))) goto end_label
+#define POP(var)  if((ret = pop(&var, &stack))) goto end_label
+#define PUSH(var) if((ret = push(var, &stack))) goto end_label
+#define RETURN_POP(var)  if((ret = pop((int *) &var, &return_stack))) goto end_label
+#define RETURN_PUSH(var) if((ret = push((int) var, &return_stack))) goto end_label
 
 union iu {int i; unsigned u;};
 
@@ -25,19 +19,19 @@ static int pc_step(const uint8_t ** pc_p) {
     return ret;
 }
 
-static int pop(int * dst, int ** stack, int * stackl) {
-    if(!(*stackl)) return STACK_UNDERFLOW_ERROR;
-    *stack -= 1;
-    *dst = **stack;
-    *stackl -= 1;
+static int pop(int * dst, stack_t * stack) {
+    if(!stack->len) return STACK_UNDERFLOW_ERROR;
+    stack->len -= 1;
+    stack->data -= 1;
+    *dst = *stack->data;
     return 0;
 }
 
-static int push(int src, int ** stack, int * stackl) {
-    if(*stackl == STKSZ) return STACK_OVERFLOW_ERROR;
-    **stack = src;
-    *stack += 1;
-    *stackl += 1;
+static int push(int src, stack_t * stack) {
+    if(stack->len == stack->max) return STACK_OVERFLOW_ERROR;
+    *stack->data = src;
+    stack->data += 1;
+    stack->len += 1;
     return 0;
 }
 
@@ -45,20 +39,19 @@ static int run(
     const uint8_t * program_start,
     const uint8_t * data_start,
     runtime_cb * runtime_cbs,
+    void * runtime_ctx,
     int variable_count
 ) {
     int ret = 0;
 
     int * stack_orig = malloc(sizeof(int) * STKSZ);
     assert(stack_orig);
-    int * stack = stack_orig;
-    int stackl = 0;
+    stack_t stack = {.data=stack_orig, .max=STKSZ, .len=0};
 
     int * return_stack_orig = malloc(sizeof(int) * RETURN_STKSZ);
     assert(return_stack_orig);
-    int * return_stack = return_stack_orig;
-    int return_stackl = 0;
-    int return_stackl_base = 0;
+    stack_t return_stack = {.data=return_stack_orig, .max=RETURN_STKSZ, .len=0};
+    int return_stack_len_base = 0;
 
     uint8_t * memory_orig = calloc(MEMSZ, 1);
     assert(memory_orig);
@@ -184,11 +177,11 @@ static int run(
                         break;
                     }
                     case 14: { /* i */
-                        PUSH(return_stack[-1]);
+                        PUSH(return_stack.data[-1]);
                         break;
                     }
                     case 15: { /* j */
-                        PUSH(return_stack[-3]);
+                        PUSH(return_stack.data[-3]);
                         break;
                     }
                     case 16: { /* 1- */
@@ -210,11 +203,11 @@ static int run(
                     case 18: { /* pick */
                         int n;
                         POP(n);
-                        if(stackl <= n) {
-                            ret = STACK_NOT_DEEP_ENOUGH_ERROR;
+                        if(stack.len <= n) {
+                            ret = STACK_UNDERFLOW_ERROR;
                             goto end_label;
                         }
-                        PUSH(stack[-n - 1]);
+                        PUSH(stack.data[-n - 1]);
                         break;
                     }
                     case 19: { /* xor */
@@ -274,7 +267,7 @@ static int run(
                         break;
                     }
                     case 27: { /* depth */
-                        PUSH(stackl);
+                        PUSH(stack.len);
                         break;
                     }
                     case 28: { /* c! */
@@ -344,31 +337,40 @@ static int run(
                         POP(x);
                         break;
                     }
+                    case 38: { /* move */
+                        int src, dst, len;
+                        POP(len);
+                        POP(dst);
+                        POP(src);
+                        memmove((void *) dst, (const void *) src, len);
+                        break;
+                    }
                     default:
                         assert(0);
                 }
                 break;
             case OPCODE_DEFINED_WORD: {
-                RETURN_PUSH(return_stackl_base);
+                RETURN_PUSH(return_stack_len_base);
                 int target_offset = pc_step(&pc);
                 RETURN_PUSH(pc);
-                return_stackl_base = return_stackl;
+                return_stack_len_base = return_stack.len;
                 pc = pc_initial + target_offset;
                 break;
             }
             case OPCODE_RUNTIME_WORD: {
                 int runtime_word_i = pc_step(&pc);
-                runtime_cbs[runtime_word_i](&stack, STKSZ, &stackl);
+                ret = runtime_cbs[runtime_word_i](runtime_ctx, &stack);
+                if(ret) goto end_label;
                 break;
             }
             case OPCODE_PUSH_LITERAL:
                 PUSH(pc_step(&pc));
                 break;
             case OPCODE_EXIT_WORD:
-                return_stack -= return_stackl - return_stackl_base;
-                return_stackl = return_stackl_base;
+                return_stack.data -= return_stack.len - return_stack_len_base;
+                return_stack.len = return_stack_len_base;
                 RETURN_POP(pc);
-                RETURN_POP(return_stackl_base);
+                RETURN_POP(return_stack_len_base);
                 break;
             case OPCODE_PUSH_DATA_ADDRESS:
                 PUSH((int) (data_start + pc_step(&pc)));
