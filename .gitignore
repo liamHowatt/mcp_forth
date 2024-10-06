@@ -1,4 +1,3 @@
-a.out
+compile-exe
+execute-exe
 *.bin
-execute
-compile
