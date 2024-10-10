@@ -31,6 +31,7 @@ typedef enum {
     OPCODE_BRANCH,
     OPCODE_DO,
     OPCODE_LOOP,
+    OPCODE_PUSH_OFFSET_ADDRESS,
     OPCODE_LAST_
 } opcode_t;
 
@@ -77,6 +78,10 @@ typedef struct {
         runtime_cb * runtime_cbs,
         void * runtime_ctx,
         int variable_count
+    );
+    int (*call_defined_word)(
+        const uint8_t * defined_word_ptr,
+        stack_t * stack
     );
 } mcp_forth_engine_t;
 

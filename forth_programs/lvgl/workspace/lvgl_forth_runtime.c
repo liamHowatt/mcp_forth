@@ -3,10 +3,12 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <time.h>
+#include <unistd.h>
 #include "mcp_forth.h"
 
 #define TOO_FEW_ARGS_ERROR -1
 #define THAT_MANY_ARGS_NOT_SUPPORTED_ERROR -2
+#define USER_DATA_WITH_DEFINED_WORD_CB_NOT_SUPPORTED_ERROR -3
 
 #define ITOV(expr) (void *) expr
 #define NOP(expr) expr
@@ -75,8 +77,21 @@
 
 union iu {int i; unsigned u;};
 
+struct cb_info;
+
 typedef struct {
+    const uint8_t * binary;
+    const uint8_t * binary_end;
+    const mcp_forth_engine_t * engine;
+    struct cb_info ** cb_infos;
+    int cb_info_count;
+    stack_t * stack;
 } ctx_t;
+
+struct cb_info {
+    const uint8_t * defined_word_pointer;
+    ctx_t * ctx;
+};
 
 static int rt_type(void * ctx, stack_t * stack)
 {
@@ -211,6 +226,52 @@ static int rt_lv_label_set_text_fmt(void * ctx, stack_t * stack)
     return 0;
 }
 
+static void obj_add_event_cb_wrapper(lv_event_t * e)
+{
+    struct cb_info * info = lv_event_get_user_data(e);
+    stack_t * stack = info->ctx->stack;
+    assert(stack->len < stack->max);
+    stack->data[0] = (int)e;
+    stack->data += 1;
+    stack->len += 1;
+    info->ctx->engine->call_defined_word(info->defined_word_pointer, stack);
+}
+static int rt_lv_obj_add_event_cb(void * ctx, stack_t * stack)
+{
+    if(!(stack->len >= 4)) return STACK_UNDERFLOW_ERROR;
+    void * cb = (void *)stack->data[-3];
+    void * user_data = (void *)stack->data[-1];
+    ctx_t * ctx2 = ctx;
+    if(cb >= (void *)ctx2->binary && cb <= (void *)(ctx2->binary_end - 1)) {
+        /* the callback is a pointer to a defined word inside the binary */
+        if(user_data) return USER_DATA_WITH_DEFINED_WORD_CB_NOT_SUPPORTED_ERROR;
+        for(int i = 0; i < ctx2->cb_info_count; i++) {
+            if(cb == ctx2->cb_infos[i]->defined_word_pointer) {
+                user_data = ctx2->cb_infos[i];
+                break;
+            }
+        }
+        if(!user_data) {
+            struct cb_info * new_info = malloc(sizeof(struct cb_info));
+            assert(new_info);
+            new_info->defined_word_pointer = cb;
+            new_info->ctx = ctx2;
+            user_data = new_info;
+
+            ctx2->cb_info_count += 1;
+            ctx2->cb_infos = realloc(ctx2->cb_infos, ctx2->cb_info_count * sizeof(struct cb_info *));
+            assert(ctx2->cb_infos);
+            ctx2->cb_infos[ctx2->cb_info_count - 1] = new_info;
+        }
+        cb = obj_add_event_cb_wrapper;
+    }
+    ctx2->stack = stack;
+    stack->data[-4] = (int)lv_obj_add_event_cb((void *)stack->data[-4], cb, stack->data[-2], user_data);
+    stack->data -= 3;
+    stack->len -= 3;
+    return 0;
+}
+
 F10(lv_screen_active)
 CONS(LV_PART_MAIN)
 F11(lv_label_create, ITOV)
@@ -227,6 +288,15 @@ F03(lv_obj_set_size, ITOV, NOP, NOP)
 CONS(LV_EVENT_ALL)
 F01(lv_obj_center, ITOV)
 
+static int rt___lvgl_timer_loop(void * ctx, stack_t * stack)
+{
+    while(1) {
+        uint32_t ms_delay = lv_timer_handler();
+        usleep(ms_delay * 1000);
+    }
+    return 0;
+}
+
 static const runtime_cb_array_t runtime_cb_array[] = {
     {"type", rt_type},
     {"cr", rt_cr},
@@ -239,6 +309,7 @@ static const runtime_cb_array_t runtime_cb_array[] = {
     {"lv_obj_set_style_bg_color", rt_lv_obj_set_style_bg_color},
     {"lv_obj_set_style_text_color", rt_lv_obj_set_style_text_color},
     {"lv_label_set_text_fmt", rt_lv_label_set_text_fmt},
+    {"lv_obj_add_event_cb", rt_lv_obj_add_event_cb},
 
     {"lv_screen_active", rt_lv_screen_active},
     {"lv_part_main", rt_LV_PART_MAIN},
@@ -256,6 +327,8 @@ static const runtime_cb_array_t runtime_cb_array[] = {
     {"lv_event_all", rt_LV_EVENT_ALL},
     {"lv_obj_center", rt_lv_obj_center},
 
+    {"__lvgl_timer_loop", rt___lvgl_timer_loop},
+
     {NULL, NULL}
 };
 
@@ -265,11 +338,15 @@ static const runtime_t lvgl_forth_runtime = {
 
 int lvgl_forth_run_binary(const uint8_t * binary, int binary_len, const mcp_forth_engine_t * engine)
 {
-    ctx_t ctx;
+    ctx_t ctx = {.binary=binary, .binary_end=binary+binary_len, .engine=engine};
     const char * missing_word;
     int res = mcp_forth_execute(binary, binary_len, &lvgl_forth_runtime, &ctx, engine, &missing_word);
     if(res == RUNTIME_WORD_MISSING_ERROR) {
         fprintf(stderr, "runtime word \"%s\" missing\n", missing_word);
     }
+    for(int i = 0; i < ctx.cb_info_count; i++) {
+        free(ctx.cb_infos[i]);
+    }
+    free(ctx.cb_infos);
     return res;
 }

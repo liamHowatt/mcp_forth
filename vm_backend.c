@@ -25,6 +25,7 @@ static fragment_t * create_fragment(opcode_t op, void * param) {
         case OPCODE_BRANCH_IF_ZERO:
         case OPCODE_BRANCH:
         case OPCODE_LOOP:
+        case OPCODE_PUSH_OFFSET_ADDRESS:
             vm_fragment->param.frag = param;
             break;
         case OPCODE_EXIT_WORD:
@@ -62,6 +63,7 @@ static int fragment_bin_size(fragment_t * fragment) {
         case OPCODE_BRANCH_IF_ZERO:
         case OPCODE_BRANCH:
         case OPCODE_LOOP:
+        case OPCODE_PUSH_OFFSET_ADDRESS:
             return num_encoded_size_from_int(vm_fragment->op)
                    + num_encoded_size_from_int(vm_fragment->param.frag->base.position
                                                - vm_fragment->base.position);
@@ -99,6 +101,7 @@ static void fragment_bin_get(fragment_t *fragment, uint8_t * dst) {
         case OPCODE_BRANCH_IF_ZERO:
         case OPCODE_BRANCH:
         case OPCODE_LOOP:
+        case OPCODE_PUSH_OFFSET_ADDRESS:
             num_encode(vm_fragment->op, dst);
             dst += num_encoded_size_from_int(vm_fragment->op);
             num_encode(vm_fragment->param.frag->base.position

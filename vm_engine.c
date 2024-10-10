@@ -4,12 +4,25 @@
 #define RETURN_STKSZ 1000
 #define MEMSZ 4000
 
-#define RASSERT(expr, ecode) do { if(!(expr)) { ret=(ecode); goto end_label; } } while(0)
+#define RASSERT(expr, ecode) do { if(!(expr)) return (ecode); } while(0)
 
-#define POP(var)  if((ret = pop(&var, &stack))) goto end_label
-#define PUSH(var) if((ret = push(var, &stack))) goto end_label
-#define RETURN_POP(var)  if((ret = pop((int *) &var, &return_stack))) goto end_label
-#define RETURN_PUSH(var) if((ret = push((int) var, &return_stack))) goto end_label
+#define POP(var)  do { int ret; if((ret = pop(&(var), &c->stack))) return ret; } while(0)
+#define PUSH(var) do { int ret; if((ret = push((var), &c->stack))) return ret; } while(0)
+#define RETURN_POP(var)  do { int ret; if((ret = pop((int *) &(var), &c->return_stack))) return ret; } while(0)
+#define RETURN_PUSH(var) do { int ret; if((ret = push((int) (var), &c->return_stack))) return ret; } while(0)
+
+typedef struct {
+    stack_t stack; /* must be first */
+    stack_t return_stack;
+    int return_stack_len_base;
+    uint8_t * memory_base;
+    uint8_t * memory;
+    uint8_t ** variables;
+    const uint8_t * pc;
+    const uint8_t * data_start;
+    runtime_cb * runtime_cbs;
+    void * runtime_ctx;
+} ectx_t;
 
 union iu {int i; unsigned u;};
 
@@ -35,35 +48,12 @@ static int push(int src, stack_t * stack) {
     return 0;
 }
 
-static int run(
-    const uint8_t * program_start,
-    const uint8_t * data_start,
-    runtime_cb * runtime_cbs,
-    void * runtime_ctx,
-    int variable_count
+static int run_inner(
+    ectx_t * c
 ) {
-    int ret = 0;
-
-    int * stack_orig = malloc(sizeof(int) * STKSZ);
-    assert(stack_orig);
-    stack_t stack = {.data=stack_orig, .max=STKSZ, .len=0};
-
-    int * return_stack_orig = malloc(sizeof(int) * RETURN_STKSZ);
-    assert(return_stack_orig);
-    stack_t return_stack = {.data=return_stack_orig, .max=RETURN_STKSZ, .len=0};
-    int return_stack_len_base = 0;
-
-    uint8_t * memory_orig = calloc(MEMSZ, 1);
-    assert(memory_orig);
-    uint8_t * memory = memory_orig;
-
-    uint8_t ** variables = malloc(variable_count * sizeof(uint8_t *));
-    assert(variables);
-
-    const uint8_t * pc = program_start;
     while(1) {
-        const uint8_t * pc_initial = pc;
-        int op = pc_step(&pc);
+        const uint8_t * pc_initial = c->pc;
+        int op = pc_step(&c->pc);
 
         int builtin_num = -1;
         if(op >= OPCODE_LAST_ && op <= NUM_MAX_ONE_BYTE) {
@@ -74,7 +64,7 @@ static int run(
         switch(op) {
             case OPCODE_BUILTIN_WORD:
                 if(builtin_num == -1) {
-                    builtin_num = pc_step(&pc);
+                    builtin_num = pc_step(&c->pc);
                 }
                 switch (builtin_num) {
                     case 0: { /* dup */
@@ -151,10 +141,9 @@ static int run(
                     case 10: { /* allot */
                         int x;
                         POP(x);
-                        memory += x;
-                        if(memory - memory_orig > MEMSZ) {
-                            ret = OUT_OF_MEMORY_ERROR;
-                            goto end_label;
+                        c->memory += x;
+                        if(c->memory - c->memory_base > MEMSZ) {
+                            return OUT_OF_MEMORY_ERROR;
                         }
                         break;
                     }
@@ -177,11 +166,11 @@ static int run(
                         break;
                     }
                     case 14: { /* i */
-                        PUSH(return_stack.data[-1]);
+                        PUSH(c->return_stack.data[-1]);
                         break;
                     }
                     case 15: { /* j */
-                        PUSH(return_stack.data[-3]);
+                        PUSH(c->return_stack.data[-3]);
                         break;
                     }
                     case 16: { /* 1- */
@@ -203,11 +192,10 @@ static int run(
                     case 18: { /* pick */
                         int n;
                         POP(n);
-                        if(stack.len <= n) {
-                            ret = STACK_UNDERFLOW_ERROR;
-                            goto end_label;
+                        if(c->stack.len <= n) {
+                            return STACK_UNDERFLOW_ERROR;
                         }
-                        PUSH(stack.data[-n - 1]);
+                        PUSH(c->stack.data[-n - 1]);
                         break;
                     }
                     case 19: { /* xor */
@@ -267,14 +255,14 @@ static int run(
                         break;
                     }
                     case 27: { /* depth */
-                        PUSH(stack.len);
+                        PUSH(c->stack.len);
                         break;
                     }
                     case 28: { /* c! */
-                        int c, addr;
+                        int chr, addr;
                         POP(addr);
-                        POP(c);
-                        *(uint8_t *)addr = c;
+                        POP(chr);
+                        *(uint8_t *)addr = chr;
                         break;
                     }
                     case 29: { /* c@ */
@@ -303,17 +291,16 @@ static int run(
                         break;
                     }
                     case 33: { /* c, */
-                        if(memory - memory_orig >= MEMSZ) {
-                            ret = OUT_OF_MEMORY_ERROR;
-                            goto end_label;
+                        if(c->memory - c->memory_base >= MEMSZ) {
+                            return OUT_OF_MEMORY_ERROR;
                         }
-                        int c;
-                        POP(c);
-                        *(memory++) = c;
+                        int chr;
+                        POP(chr);
+                        *(c->memory++) = chr;
                         break;
                     }
                     case 34: { /* here */
-                        PUSH((int) memory);
+                        PUSH((int) c->memory);
                         break;
                     }
                     case 35: { /* max */
@@ -324,11 +311,11 @@ static int run(
                         break;
                     }
                     case 36: { /* fill */
-                        int addr, len, c;
-                        POP(c);
+                        int addr, len, chr;
+                        POP(chr);
                         POP(len);
                         POP(addr);
-                        memset((void *) addr, c, len);
+                        memset((void *) addr, chr, len);
                         break;
                     }
                     case 37: { /* 2drop */
@@ -345,59 +332,68 @@ static int run(
                         memmove((void *) dst, (const void *) src, len);
                         break;
                     }
+                    case 39: { /* execute */
+                        RETURN_PUSH(c->return_stack_len_base);
+                        RETURN_PUSH(c->pc);
+                        c->return_stack_len_base = c->return_stack.len;
+                        int fn;
+                        POP(fn);
+                        c->pc = (const uint8_t *) fn;
+                        break;
+                    }
                     default:
                         assert(0);
                 }
                 break;
             case OPCODE_DEFINED_WORD: {
-                RETURN_PUSH(return_stack_len_base);
-                int target_offset = pc_step(&pc);
-                RETURN_PUSH(pc);
-                return_stack_len_base = return_stack.len;
-                pc = pc_initial + target_offset;
+                RETURN_PUSH(c->return_stack_len_base);
+                int target_offset = pc_step(&c->pc);
+                RETURN_PUSH(c->pc);
+                c->return_stack_len_base = c->return_stack.len;
+                c->pc = pc_initial + target_offset;
                 break;
             }
             case OPCODE_RUNTIME_WORD: {
-                int runtime_word_i = pc_step(&pc);
-                ret = runtime_cbs[runtime_word_i](runtime_ctx, &stack);
-                if(ret) goto end_label;
+                int runtime_word_i = pc_step(&c->pc);
+                int ret = c->runtime_cbs[runtime_word_i](c->runtime_ctx, &c->stack);
+                if(ret) return ret;
                 break;
             }
             case OPCODE_PUSH_LITERAL:
-                PUSH(pc_step(&pc));
+                PUSH(pc_step(&c->pc));
                 break;
             case OPCODE_EXIT_WORD:
-                return_stack.data -= return_stack.len - return_stack_len_base;
-                return_stack.len = return_stack_len_base;
-                RETURN_POP(pc);
-                RETURN_POP(return_stack_len_base);
+                c->return_stack.data -= c->return_stack.len - c->return_stack_len_base;
+                c->return_stack.len = c->return_stack_len_base;
+                RETURN_POP(c->pc);
+                RETURN_POP(c->return_stack_len_base);
+                if(c->pc == NULL) return 0;
                 break;
             case OPCODE_PUSH_DATA_ADDRESS:
-                PUSH((int) (data_start + pc_step(&pc)));
+                PUSH((int) (c->data_start + pc_step(&c->pc)));
                 break;
             case OPCODE_DECLARE_VARIABLE:
-                while(((unsigned) memory) % 4u) memory++;
-                variables[pc_step(&pc)] = memory;
-                memory += 4;
-                if(memory - memory_orig > MEMSZ) {
-                    ret = OUT_OF_MEMORY_ERROR;
-                    goto end_label;
+                while(((unsigned) c->memory) % 4u) c->memory++;
+                c->variables[pc_step(&c->pc)] = c->memory;
+                c->memory += 4;
+                if(c->memory - c->memory_base > MEMSZ) {
+                    return OUT_OF_MEMORY_ERROR;
                 }
                 break;
             case OPCODE_USE_VARIABLE:
-                PUSH((int) variables[pc_step(&pc)]);
+                PUSH((int) c->variables[pc_step(&c->pc)]);
                 break;
             case OPCODE_HALT:
-                goto end_label;
+                return 0;
             case OPCODE_BRANCH_IF_ZERO: {
                 int cond;
                 POP(cond);
-                int target_offset = pc_step(&pc);
-                if(cond == 0) pc = pc_initial + target_offset;
+                int target_offset = pc_step(&c->pc);
+                if(cond == 0) c->pc = pc_initial + target_offset;
                 break;
             }
             case OPCODE_BRANCH:
-                pc = pc_initial + pc_step(&pc);
+                c->pc = pc_initial + pc_step(&c->pc);
                 break;
             case OPCODE_DO: {
                 int end, start;
@@ -408,31 +404,88 @@ static int run(
                 break;
             }
             case OPCODE_LOOP: {
-                int target_offset = pc_step(&pc);
+                int target_offset = pc_step(&c->pc);
                 int end, i;
                 RETURN_POP(i);
                 RETURN_POP(end);
                 i++;
                 if(i < end) {
-                    pc = pc_initial + target_offset;
+                    c->pc = pc_initial + target_offset;
                     RETURN_PUSH(end);
                     RETURN_PUSH(i);
                 }
+                break;
+            }
+            case OPCODE_PUSH_OFFSET_ADDRESS: {
+                int offset = pc_step(&c->pc);
+                PUSH((int) pc_initial + offset);
                 break;
             }
             default:
                 assert(0);
         }
     }
+}
 
-end_label:
-    free(variables);
+static int run(
+    const uint8_t * program_start,
+    const uint8_t * data_start,
+    runtime_cb * runtime_cbs,
+    void * runtime_ctx,
+    int variable_count
+) {
+    ectx_t c;
+
+    int * stack_orig = malloc(sizeof(int) * STKSZ);
+    assert(stack_orig);
+    c.stack.data = stack_orig;
+    c.stack.max = STKSZ;
+    c.stack.len = 0;
+
+    int * return_stack_orig = malloc(sizeof(int) * RETURN_STKSZ);
+    assert(return_stack_orig);
+    c.return_stack.data = return_stack_orig;
+    c.return_stack.max = RETURN_STKSZ;
+    c.return_stack.len = 0;
+    c.return_stack_len_base = 0;
+
+    uint8_t * memory_orig = calloc(MEMSZ, 1);
+    assert(memory_orig);
+    c.memory_base = memory_orig;
+    c.memory = memory_orig;
+
+    c.variables = malloc(variable_count * sizeof(uint8_t *));
+    assert(c.variables);
+
+    c.pc = program_start;
+    c.data_start = data_start;
+    c.runtime_cbs = runtime_cbs;
+    c.runtime_ctx = runtime_ctx;
+
+    int ret = run_inner(&c);
+
+    free(c.variables);
     free(memory_orig);
     free(stack_orig);
     free(return_stack_orig);
     return ret;
 }
 
+static int call_defined_word(const uint8_t * defined_word_ptr, stack_t * stack)
+{
+    int ret = 0;
+    ectx_t * c = (ectx_t *) stack;
+    RETURN_PUSH(c->return_stack_len_base);
+    RETURN_PUSH(NULL);
+    c->return_stack_len_base = c->return_stack.len;
+    const uint8_t * pc_save = c->pc;
+    c->pc = defined_word_ptr;
+    ret = run_inner(c);
+    c->pc = pc_save;
+    return ret;
+}
+
 const mcp_forth_engine_t compact_bytecode_vm_engine = {
-    .run=run
+    .run=run,
+    .call_defined_word=call_defined_word
 };

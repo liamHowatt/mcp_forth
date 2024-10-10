@@ -1,17 +1,18 @@
 #include "mcp_forth.h"
 
-#define UNKNOWN_ERROR                                 -1
-#define NOT_ALLOWED_INSIDE_WORD_ERROR                 -2
-#define EARLY_END_OF_SOURCE_ERROR                     -3
-#define WORD_REDEFINED_ERROR                          -4
-#define WORD_USED_BEFORE_DEFINED_ERROR                -5
-#define UNEXPECTED_SEMICOLON_ERROR                    -6
-#define NOT_ALLOWED_OUTSIDE_WORD_ERROR                -7
-#define VARIABLE_REDEFINED_ERROR                      -8
-#define WRONG_TERMINATOR_FOR_THIS_CONTROL_FLOW_ERROR  -9
-#define UNTERMINATED_CONTROL_FLOW_ERROR               -10
-#define UNEXPECTED_CONTROL_FLOW_TERMINATOR_ERROR      -11
-#define LOOP_INDEX_USED_OUTSIDE_LOOP                  -12
+#define UNKNOWN_ERROR                                          -1
+#define NOT_ALLOWED_INSIDE_WORD_ERROR                          -2
+#define EARLY_END_OF_SOURCE_ERROR                              -3
+#define WORD_REDEFINED_ERROR                                   -4
+#define WORD_USED_BEFORE_DEFINED_ERROR                         -5
+#define UNEXPECTED_SEMICOLON_ERROR                             -6
+#define NOT_ALLOWED_OUTSIDE_WORD_ERROR                         -7
+#define VARIABLE_REDEFINED_ERROR                               -8
+#define WRONG_TERMINATOR_FOR_THIS_CONTROL_FLOW_ERROR           -9
+#define UNTERMINATED_CONTROL_FLOW_ERROR                       -10
+#define UNEXPECTED_CONTROL_FLOW_TERMINATOR_ERROR              -11
+#define LOOP_INDEX_USED_OUTSIDE_LOOP                          -12
+#define TICK_OPERATOR_COULD_NOT_FIND_DEFINED_WORD_ERROR       -13
 
 #define NSTRING_LITERAL(lit) {.str = (lit), .len = sizeof(lit) - 1}
 #define ARRAY_LEN(arr) (sizeof(arr) / sizeof(*(arr)))
@@ -89,6 +90,7 @@ static const nstring_t builtins[] = {
     NSTRING_LITERAL("fill"),
     NSTRING_LITERAL("2drop"),
     NSTRING_LITERAL("move"),
+    NSTRING_LITERAL("execute"),
 };
 
 static bool next_word(source_scanner_t * ss)
@@ -564,6 +566,12 @@ int mcp_forth_compile(
         }
         else if(EQUAL_STRING_LITERAL("\\", ss.word, ss.word_len, false)) {
             next_line(&ss);
+        }
+        else if(EQUAL_STRING_LITERAL("'", ss.word, ss.word_len, false)) {
+            RASSERT(next_word(&ss), EARLY_END_OF_SOURCE_ERROR);
+            int defined_i = find_nstring(defined_word_nstrings, grow_array_get_len(defined_word_nstrings), ss.word, ss.word_len, false);
+            RASSERT(defined_i != -1, TICK_OPERATOR_COULD_NOT_FIND_DEFINED_WORD_ERROR);
+            fragment_helper(&fragments, backend, OPCODE_PUSH_OFFSET_ADDRESS, defined_word_fragments[defined_i], defining_word);
         }
         else {
             int literal;
