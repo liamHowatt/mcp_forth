@@ -1,3 +1,7 @@
 compile-exe
 execute-exe
-*.bin
+/*.bin
+x86-32_backend_generated.c
+x86-32_backend_generated.h
+x86-32_engine_asm.o
+__pycache__

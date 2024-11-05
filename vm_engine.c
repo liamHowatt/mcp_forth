@@ -1,111 +1,168 @@
 #include "mcp_forth.h"
-
-#define STKSZ 1000
-#define RETURN_STKSZ 1000
-#define MEMSZ 4000
+#include <stdarg.h>
 
 #define RASSERT(expr, ecode) do { if(!(expr)) return (ecode); } while(0)
 
-#define POP(var)  do { int ret; if((ret = pop(&(var), &c->stack))) return ret; } while(0)
+#define POP(var)  do { int ret; if((ret = pop((var), &c->stack))) return ret; } while(0)
 #define PUSH(var) do { int ret; if((ret = push((var), &c->stack))) return ret; } while(0)
-#define RETURN_POP(var)  do { int ret; if((ret = pop((int *) &(var), &c->return_stack))) return ret; } while(0)
+#define RETURN_POP(var)  do { int ret; if((ret = pop((int *) (var), &c->return_stack))) return ret; } while(0)
 #define RETURN_PUSH(var) do { int ret; if((ret = push((int) (var), &c->return_stack))) return ret; } while(0)
 
-typedef struct {
-    stack_t stack; /* must be first */
-    stack_t return_stack;
-    int return_stack_len_base;
-    uint8_t * memory_base;
-    uint8_t * memory;
-    uint8_t ** variables;
-    const uint8_t * pc;
-    const uint8_t * data_start;
-    runtime_cb * runtime_cbs;
-    void * runtime_ctx;
-} ectx_t;
+#define MAX_CALLBACKS 8
+#define CALLBACK_TARGET_NAME(number) callback_target_ ## number
+#define CALLBACK_TARGET_DEFINE(number) static int CALLBACK_TARGET_NAME(number)(int arg1, ...) { \
+    va_list ap; \
+    va_start(ap, arg1); \
+    int ret = callback_handle(number, arg1, ap); \
+    va_end(ap); \
+    return ret; \
+}
 
 union iu {int i; unsigned u;};
 
+typedef struct {
+    m4_stack_t stack;
+    m4_stack_t return_stack;
+    int return_stack_len_base;
+    uint8_t * memory_base;
+    uint8_t * memory;
+    int memory_len;
+    const m4_runtime_cb_pair_t ** runtime_cbs;
+    const uint8_t * data_start;
+    union {int * ip; int i;} * variables_and_constants;
+    uint8_t * callback_info;
+    const uint8_t ** callback_word_locations;
+    const uint8_t * pc;
+} ctx_t;
+
+#ifdef M4_NO_TLS
+static ctx_t * g_ctx;
+#else
+static __thread ctx_t * g_ctx;
+#endif
+
+static int run_inner(ctx_t * c);
+
 static int pc_step(const uint8_t ** pc_p) {
-    int ret = num_decode(*pc_p);
-    *pc_p += num_encoded_size_from_encoded(*pc_p);
+    int ret = m4_num_decode(*pc_p);
+    *pc_p += m4_num_encoded_size_from_encoded(*pc_p);
     return ret;
 }
 
-static int pop(int * dst, stack_t * stack) {
-    if(!stack->len) return STACK_UNDERFLOW_ERROR;
-    stack->len -= 1;
+static int pop(int * dst, m4_stack_t * stack) {
+    if(stack->len <= 0) return M4_STACK_UNDERFLOW_ERROR;
     stack->data -= 1;
-    *dst = *stack->data;
+    stack->len -= 1;
+    *dst = stack->data[0];
     return 0;
 }
 
-static int push(int src, stack_t * stack) {
-    if(stack->len == stack->max) return STACK_OVERFLOW_ERROR;
-    *stack->data = src;
+static int push(int src, m4_stack_t * stack) {
+    if(stack->len >= stack->max) return M4_STACK_OVERFLOW_ERROR;
+    stack->data[0] = src;
     stack->data += 1;
     stack->len += 1;
     return 0;
 }
 
-static int run_inner(
-    ectx_t * c
-) {
+static int callback_handle(int cb_i, int arg1, va_list ap)
+{
+    ctx_t * c = g_ctx;
+    uint8_t cb_info = c->callback_info[cb_i];
+    int n_params = cb_info >> 1;
+    assert(0 == push(arg1, &c->stack));
+    for(int i = 1; i < n_params; i++) {
+        assert(0 == push(va_arg(ap, int), &c->stack));
+    }
+    assert(0 == push(c->return_stack_len_base, &c->return_stack));
+    assert(0 == push((int) NULL, &c->return_stack));
+    c->return_stack_len_base = c->return_stack.len;
+    const uint8_t * pc_save = c->pc;
+    c->pc = c->callback_word_locations[cb_i];
+    assert(0 == run_inner(c));
+    c->pc = pc_save;
+    bool has_return_val = cb_info & 1;
+    int ret;
+    if(has_return_val) assert(0 == pop(&ret, &c->stack));
+    return ret; /* uninitialized is ok */
+}
+
+CALLBACK_TARGET_DEFINE(0)
+CALLBACK_TARGET_DEFINE(1)
+CALLBACK_TARGET_DEFINE(2)
+CALLBACK_TARGET_DEFINE(3)
+CALLBACK_TARGET_DEFINE(4)
+CALLBACK_TARGET_DEFINE(5)
+CALLBACK_TARGET_DEFINE(6)
+CALLBACK_TARGET_DEFINE(7)
+
+static int (*const callback_targets[MAX_CALLBACKS])(int arg1, ...) = {
+    CALLBACK_TARGET_NAME(0),
+    CALLBACK_TARGET_NAME(1),
+    CALLBACK_TARGET_NAME(2),
+    CALLBACK_TARGET_NAME(3),
+    CALLBACK_TARGET_NAME(4),
+    CALLBACK_TARGET_NAME(5),
+    CALLBACK_TARGET_NAME(6),
+    CALLBACK_TARGET_NAME(7),
+};
+
+static int run_inner(ctx_t * c) {
     while(1) {
         const uint8_t * pc_initial = c->pc;
         int op = pc_step(&c->pc);
 
         int builtin_num = -1;
-        if(op >= OPCODE_LAST_ && op <= NUM_MAX_ONE_BYTE) {
-            builtin_num = op - OPCODE_LAST_;
-            op = OPCODE_BUILTIN_WORD;
+        if(op >= M4_OPCODE_LAST_ && op <= M4_NUM_MAX_ONE_BYTE) {
+            builtin_num = op - M4_OPCODE_LAST_;
+            op = M4_OPCODE_BUILTIN_WORD;
         }
 
         switch(op) {
-            case OPCODE_BUILTIN_WORD:
+            case M4_OPCODE_BUILTIN_WORD:
                 if(builtin_num == -1) {
                     builtin_num = pc_step(&c->pc);
                 }
                 switch (builtin_num) {
                     case 0: { /* dup */
                         int x;
-                        POP(x);
+                        POP(&x);
                         PUSH(x);
                         PUSH(x);
                         break;
                     }
                     case 1: { /* - */
                         int l, r;
-                        POP(r);
-                        POP(l);
+                        POP(&r);
+                        POP(&l);
                         PUSH(l - r);
                         break;
                     }
                     case 2: { /* > */
                         int l, r;
-                        POP(r);
-                        POP(l);
+                        POP(&r);
+                        POP(&l);
                         PUSH(l > r ? -1 : 0);
                         break;
                     }
                     case 3: { /* + */
                         int l, r;
-                        POP(r);
-                        POP(l);
+                        POP(&r);
+                        POP(&l);
                         PUSH(l + r);
                         break;
                     }
                     case 4: { /* = */
                         int l, r;
-                        POP(r);
-                        POP(l);
+                        POP(&r);
+                        POP(&l);
                         PUSH(l == r ? -1 : 0);
                         break;
                     }
                     case 5: { /* over */
                         int b, a;
-                        POP(a);
-                        POP(b);
+                        POP(&a);
+                        POP(&b);
                         PUSH(b);
                         PUSH(a);
                         PUSH(b);
@@ -113,55 +170,55 @@ static int run_inner(
                     }
                     case 6: { /* mod */
                         int l, r;
-                        POP(r);
-                        POP(l);
+                        POP(&r);
+                        POP(&l);
                         PUSH(l % r);
                         break;
                     }
                     case 7: { /* drop */
                         int x;
-                        POP(x);
+                        POP(&x);
                         break;
                     }
                     case 8: { /* swap */
                         int b, a;
-                        POP(a);
-                        POP(b);
+                        POP(&a);
+                        POP(&b);
                         PUSH(a);
                         PUSH(b);
                         break;
                     }
                     case 9: { /* * */
                         int l, r;
-                        POP(r);
-                        POP(l);
+                        POP(&r);
+                        POP(&l);
                         PUSH(l * r);
                         break;
                     }
                     case 10: { /* allot */
                         int x;
-                        POP(x);
+                        POP(&x);
                         c->memory += x;
-                        if(c->memory - c->memory_base > MEMSZ) {
-                            return OUT_OF_MEMORY_ERROR;
-                        }
+                        int bytes_remaining = m4_bytes_remaining(c->memory_base, c->memory, c->memory_len);
+                        if(bytes_remaining < 0) return M4_OUT_OF_MEMORY_ERROR;
+                        if(bytes_remaining > c->memory_len) return M4_DATA_SPACE_POINTER_OUT_OF_BOUNDS_ERROR;
                         break;
                     }
                     case 11: { /* 1+ */
                         int x;
-                        POP(x);
+                        POP(&x);
                         PUSH(x + 1);
                         break;
                     }
                     case 12: { /* invert */
                         int x;
-                        POP(x);
+                        POP(&x);
                         PUSH(~x);
                         break;
                     }
                     case 13: { /* 0= */
                         int x;
-                        POP(x);
+                        POP(&x);
                         PUSH(x == 0 ? -1 : 0);
                         break;
                     }
@@ -175,15 +232,15 @@ static int run_inner(
                     }
                     case 16: { /* 1- */
                         int x;
-                        POP(x);
+                        POP(&x);
                         PUSH(x - 1);
                         break;
                     }
                     case 17: { /* rot */
                         int x1, x2, x3;
-                        POP(x3);
-                        POP(x2);
-                        POP(x1);
+                        POP(&x3);
+                        POP(&x2);
+                        POP(&x1);
                         PUSH(x2);
                         PUSH(x3);
                         PUSH(x1);
@@ -191,66 +248,66 @@ static int run_inner(
                     }
                     case 18: { /* pick */
                         int n;
-                        POP(n);
+                        POP(&n);
                         if(c->stack.len <= n) {
-                            return STACK_UNDERFLOW_ERROR;
+                            return M4_STACK_UNDERFLOW_ERROR;
                         }
                         PUSH(c->stack.data[-n - 1]);
                         break;
                     }
                     case 19: { /* xor */
                         int l, r;
-                        POP(r);
-                        POP(l);
+                        POP(&r);
+                        POP(&l);
                         PUSH(l ^ r);
                         break;
                     }
                     case 20: { /* lshift */
                         union iu l, r;
-                        POP(r.i);
-                        POP(l.i);
+                        POP(&r.i);
+                        POP(&l.i);
                         PUSH(l.u << r.u);
                         break;
                     }
                     case 21: { /* rshift */
                         union iu l, r;
-                        POP(r.i);
-                        POP(l.i);
+                        POP(&r.i);
+                        POP(&l.i);
                         PUSH(l.u >> r.u);
                         break;
                     }
                     case 22: { /* < */
                         int l, r;
-                        POP(r);
-                        POP(l);
+                        POP(&r);
+                        POP(&l);
                         PUSH(l < r ? -1 : 0);
                         break;
                     }
                     case 23: { /* >= */
                         int l, r;
-                        POP(r);
-                        POP(l);
+                        POP(&r);
+                        POP(&l);
                         PUSH(l >= r ? -1 : 0);
                         break;
                     }
                     case 24: { /* <= */
                         int l, r;
-                        POP(r);
-                        POP(l);
+                        POP(&r);
+                        POP(&l);
                         PUSH(l <= r ? -1 : 0);
                         break;
                     }
                     case 25: { /* or */
                         union iu l, r;
-                        POP(r.i);
-                        POP(l.i);
+                        POP(&r.i);
+                        POP(&l.i);
                         PUSH(l.u | r.u);
                         break;
                     }
                     case 26: { /* and */
                         union iu l, r;
-                        POP(r.i);
-                        POP(l.i);
+                        POP(&r.i);
+                        POP(&l.i);
                         PUSH(l.u & r.u);
                         break;
                     }
@@ -260,42 +317,42 @@ static int run_inner(
                     }
                     case 28: { /* c! */
                         int chr, addr;
-                        POP(addr);
-                        POP(chr);
+                        POP(&addr);
+                        POP(&chr);
                         *(uint8_t *)addr = chr;
                         break;
                     }
                     case 29: { /* c@ */
                         int addr;
-                        POP(addr);
+                        POP(&addr);
                         PUSH(*(uint8_t *)addr);
                         break;
                     }
                     case 30: { /* 0< */
                         int x;
-                        POP(x);
+                        POP(&x);
                         PUSH(x < 0 ? -1 : 0);
                         break;
                     }
                     case 31: { /* ! */
                         int x, addr;
-                        POP(addr);
-                        POP(x);
+                        POP(&addr);
+                        POP(&x);
                         *(int *)addr = x;
                         break;
                     }
                     case 32: { /* @ */
                         int addr;
-                        POP(addr);
+                        POP(&addr);
                         PUSH(*(int *)addr);
                         break;
                     }
                     case 33: { /* c, */
-                        if(c->memory - c->memory_base >= MEMSZ) {
-                            return OUT_OF_MEMORY_ERROR;
+                        if(m4_bytes_remaining(c->memory_base, c->memory, c->memory_len) < 1) {
+                            return M4_OUT_OF_MEMORY_ERROR;
                         }
                         int chr;
-                        POP(chr);
+                        POP(&chr);
                         *(c->memory++) = chr;
                         break;
                     }
@@ -305,30 +362,30 @@ static int run_inner(
                     }
                     case 35: { /* max */
                         int a, b;
-                        POP(b);
-                        POP(a);
+                        POP(&b);
+                        POP(&a);
                         PUSH(a > b ? a : b);
                         break;
                     }
                     case 36: { /* fill */
                         int addr, len, chr;
-                        POP(chr);
-                        POP(len);
-                        POP(addr);
+                        POP(&chr);
+                        POP(&len);
+                        POP(&addr);
                         memset((void *) addr, chr, len);
                         break;
                     }
                     case 37: { /* 2drop */
                         int x;
-                        POP(x);
-                        POP(x);
+                        POP(&x);
+                        POP(&x);
                         break;
                     }
                     case 38: { /* move */
                         int src, dst, len;
-                        POP(len);
-                        POP(dst);
-                        POP(src);
+                        POP(&len);
+                        POP(&dst);
+                        POP(&src);
                         memmove((void *) dst, (const void *) src, len);
                         break;
                     }
@@ -337,15 +394,141 @@ static int run_inner(
                         RETURN_PUSH(c->pc);
                         c->return_stack_len_base = c->return_stack.len;
                         int fn;
-                        POP(fn);
+                        POP(&fn);
                         c->pc = (const uint8_t *) fn;
+                        break;
+                    }
+                    case 40: /* align */
+                        c->memory = m4_align(c->memory);
+                        if(m4_bytes_remaining(c->memory_base, c->memory, c->memory_len) < 0) {
+                            return M4_OUT_OF_MEMORY_ERROR;
+                        }
+                        break;
+                    case 41: { /* , */
+                        if(m4_bytes_remaining(c->memory_base, c->memory, c->memory_len) < 4) {
+                            return M4_OUT_OF_MEMORY_ERROR;
+                        }
+                        int x;
+                        POP(&x);
+                        *(int *) c->memory = x;
+                        c->memory += 4;
+                        break;
+                    }
+                    case 42: { /* compare */
+                        int a1, u1, a2, u2;
+                        POP(&u2);
+                        POP(&a2);
+                        POP(&u1);
+                        POP(&a1);
+                        int result = memcmp((void *) a1, (void *) a2, u1 < u2 ? u1 : u2);
+                        if(result == 0) {
+                            PUSH(u1 < u2 ? -1 : u1 > u2 ? 1 : 0);
+                        } else {
+                            PUSH(result < 0 ? -1 : 1);
+                        }
+                        break;
+                    }
+                    case 43: { /* <> */
+                        int l, r;
+                        POP(&r);
+                        POP(&l);
+                        PUSH(l != r ? -1 : 0);
+                        break;
+                    }
+                    case 44: { /* >r */
+                        int x;
+                        POP(&x);
+                        RETURN_PUSH(x);
+                        break;
+                    }
+                    case 45: { /* r> */
+                        int x;
+                        RETURN_POP(&x);
+                        PUSH(x);
+                        break;
+                    }
+                    case 46: { /* 2>r */
+                        int l, r;
+                        POP(&r);
+                        POP(&l);
+                        RETURN_PUSH(l);
+                        RETURN_PUSH(r);
+                        break;
+                    }
+                    case 47: { /* 2r> */
+                        int l, r;
+                        RETURN_POP(&r);
+                        RETURN_POP(&l);
+                        PUSH(l);
+                        PUSH(r);
+                        break;
+                    }
+                    case 48: { /* 2/ */
+                        int x;
+                        POP(&x);
+                        PUSH(x / 2);
+                        break;
+                    }
+                    case 49: { /* 2dup */
+                        int l, r;
+                        POP(&r);
+                        POP(&l);
+                        PUSH(l);
+                        PUSH(r);
+                        PUSH(l);
+                        PUSH(r);
+                        break;
+                    }
+                    case 50: { /* 0<> */
+                        int x;
+                        POP(&x);
+                        PUSH(x != 0 ? -1 : 0);
+                        break;
+                    }
+                    case 51: { /* 0> */
+                        int x;
+                        POP(&x);
+                        PUSH(x > 0 ? -1 : 0);
+                        break;
+                    }
+                    case 52: { /* w@ */
+                        int addr;
+                        POP(&addr);
+                        PUSH(*(uint16_t *)addr);
+                        break;
+                    }
+                    case 53: { /* w! */
+                        int chr, addr;
+                        POP(&addr);
+                        POP(&chr);
+                        *(uint16_t *)addr = chr;
+                        break;
+                    }
+                    case 54: { /* +! */
+                        int n, addr;
+                        POP(&addr);
+                        POP(&n);
+                        *(int *) addr += n;
+                        break;
+                    }
+                    case 55: { /* / */
+                        int l, r;
+                        POP(&r);
+                        POP(&l);
+                        PUSH(l / r);
+                        break;
+                    }
+                    case 56: { /* cells */
+                        int x;
+                        POP(&x);
+                        PUSH(x * 4);
                         break;
                     }
                     default:
                         assert(0);
                 }
                 break;
-            case OPCODE_DEFINED_WORD: {
+            case M4_OPCODE_DEFINED_WORD: {
                 RETURN_PUSH(c->return_stack_len_base);
                 int target_offset = pc_step(&c->pc);
                 RETURN_PUSH(c->pc);
@@ -353,61 +536,62 @@ static int run_inner(
                 c->pc = pc_initial + target_offset;
                 break;
             }
-            case OPCODE_RUNTIME_WORD: {
+            case M4_OPCODE_RUNTIME_WORD: {
                 int runtime_word_i = pc_step(&c->pc);
-                int ret = c->runtime_cbs[runtime_word_i](c->runtime_ctx, &c->stack);
+                const m4_runtime_cb_pair_t * cb_pair = c->runtime_cbs[runtime_word_i];
+                int ret = cb_pair->cb(cb_pair->param, &c->stack);
                 if(ret) return ret;
                 break;
             }
-            case OPCODE_PUSH_LITERAL:
+            case M4_OPCODE_PUSH_LITERAL:
                 PUSH(pc_step(&c->pc));
                 break;
-            case OPCODE_EXIT_WORD:
+            case M4_OPCODE_EXIT_WORD:
                 c->return_stack.data -= c->return_stack.len - c->return_stack_len_base;
                 c->return_stack.len = c->return_stack_len_base;
-                RETURN_POP(c->pc);
-                RETURN_POP(c->return_stack_len_base);
+                RETURN_POP(&c->pc);
+                RETURN_POP(&c->return_stack_len_base);
                 if(c->pc == NULL) return 0;
                 break;
-            case OPCODE_PUSH_DATA_ADDRESS:
+            case M4_OPCODE_PUSH_DATA_ADDRESS:
                 PUSH((int) (c->data_start + pc_step(&c->pc)));
                 break;
-            case OPCODE_DECLARE_VARIABLE:
-                while(((unsigned) c->memory) % 4u) c->memory++;
-                c->variables[pc_step(&c->pc)] = c->memory;
+            case M4_OPCODE_DECLARE_VARIABLE:
+                c->memory = m4_align(c->memory);
+                c->variables_and_constants[pc_step(&c->pc)].ip = (int *) c->memory;
                 c->memory += 4;
-                if(c->memory - c->memory_base > MEMSZ) {
-                    return OUT_OF_MEMORY_ERROR;
+                if(m4_bytes_remaining(c->memory_base, c->memory, c->memory_len) < 0) {
+                    return M4_OUT_OF_MEMORY_ERROR;
                 }
                 break;
-            case OPCODE_USE_VARIABLE:
-                PUSH((int) c->variables[pc_step(&c->pc)]);
+            case M4_OPCODE_USE_VARIABLE_OR_CONSTANT:
+                PUSH(c->variables_and_constants[pc_step(&c->pc)].i);
                 break;
-            case OPCODE_HALT:
+            case M4_OPCODE_HALT:
                 return 0;
-            case OPCODE_BRANCH_IF_ZERO: {
+            case M4_OPCODE_BRANCH_IF_ZERO: {
                 int cond;
-                POP(cond);
+                POP(&cond);
                 int target_offset = pc_step(&c->pc);
                 if(cond == 0) c->pc = pc_initial + target_offset;
                 break;
             }
-            case OPCODE_BRANCH:
+            case M4_OPCODE_BRANCH:
                 c->pc = pc_initial + pc_step(&c->pc);
                 break;
-            case OPCODE_DO: {
+            case M4_OPCODE_DO: {
                 int end, start;
-                POP(start);
-                POP(end);
+                POP(&start);
+                POP(&end);
                 RETURN_PUSH(end);
                 RETURN_PUSH(start);
                 break;
             }
-            case OPCODE_LOOP: {
+            case M4_OPCODE_LOOP: {
                 int target_offset = pc_step(&c->pc);
                 int end, i;
-                RETURN_POP(i);
-                RETURN_POP(end);
+                RETURN_POP(&i);
+                RETURN_POP(&end);
                 i++;
                 if(i < end) {
                     c->pc = pc_initial + target_offset;
@@ -416,9 +600,18 @@ static int run_inner(
                 }
                 break;
             }
-            case OPCODE_PUSH_OFFSET_ADDRESS: {
+            case M4_OPCODE_PUSH_OFFSET_ADDRESS: {
                 int offset = pc_step(&c->pc);
                 PUSH((int) pc_initial + offset);
+                break;
+            }
+            case M4_OPCODE_PUSH_CALLBACK:
+                PUSH((int) callback_targets[pc_step(&c->pc)]);
+                break;
+            case M4_OPCODE_DECLARE_CONSTANT: {
+                int x;
+                POP(&x);
+                c->variables_and_constants[pc_step(&c->pc)].i = x;
                 break;
             }
             default:
@@ -427,65 +620,53 @@ static int run_inner(
     }
 }
 
-static int run(
-    const uint8_t * program_start,
-    const uint8_t * data_start,
-    runtime_cb * runtime_cbs,
-    void * runtime_ctx,
-    int variable_count
+int m4_vm_engine_run(
+    const uint8_t * bin,
+    int bin_len,
+    uint8_t * memory_start,
+    int memory_len,
+    const m4_runtime_cb_array_t ** cb_arrays,
+    const char ** missing_runtime_word_dst
 ) {
-    ectx_t c;
+    uint8_t * memory_p = m4_align(memory_start);
+    ctx_t * c = (ctx_t *) memory_p;
+    memory_p += sizeof(ctx_t);
+    if(m4_bytes_remaining(memory_start, memory_p, memory_len) < 0) return M4_OUT_OF_MEMORY_ERROR;
+    g_ctx = c;
 
-    int * stack_orig = malloc(sizeof(int) * STKSZ);
-    assert(stack_orig);
-    c.stack.data = stack_orig;
-    c.stack.max = STKSZ;
-    c.stack.len = 0;
+    c->stack.data = (int *) memory_p;
+    memory_p += 100 * 4;
+    if(m4_bytes_remaining(memory_start, memory_p, memory_len) < 0) return M4_OUT_OF_MEMORY_ERROR;
+    c->stack.max = 100;
+    c->stack.len = 0;
 
-    int * return_stack_orig = malloc(sizeof(int) * RETURN_STKSZ);
-    assert(return_stack_orig);
-    c.return_stack.data = return_stack_orig;
-    c.return_stack.max = RETURN_STKSZ;
-    c.return_stack.len = 0;
-    c.return_stack_len_base = 0;
+    c->return_stack.data = (int *) memory_p;
+    memory_p += 100 * 4;
+    if(m4_bytes_remaining(memory_start, memory_p, memory_len) < 0) return M4_OUT_OF_MEMORY_ERROR;
+    c->return_stack.max = 100;
+    c->return_stack.len = 0;
+    c->return_stack_len_base = 0;
 
-    uint8_t * memory_orig = calloc(MEMSZ, 1);
-    assert(memory_orig);
-    c.memory_base = memory_orig;
-    c.memory = memory_orig;
+    c->memory_base = memory_start;
+    c->memory_len = memory_len;
 
-    c.variables = malloc(variable_count * sizeof(uint8_t *));
-    assert(c.variables);
+    int res = m4_unpack_binary_header(
+        bin,
+        bin_len,
+        memory_p,
+        m4_bytes_remaining(memory_start, memory_p, memory_len),
+        cb_arrays,
+        missing_runtime_word_dst,
+        MAX_CALLBACKS,
+        (int ***) &c->variables_and_constants,
+        &c->runtime_cbs,
+        &c->data_start,
+        &c->callback_info,
+        &c->callback_word_locations,
+        &c->pc,
+        &c->memory
+    );
+    if(res) return res;
 
-    c.pc = program_start;
-    c.data_start = data_start;
-    c.runtime_cbs = runtime_cbs;
-    c.runtime_ctx = runtime_ctx;
-
-    int ret = run_inner(&c);
-
-    free(c.variables);
-    free(memory_orig);
-    free(stack_orig);
-    free(return_stack_orig);
-    return ret;
+    return run_inner(c);
 }
-
-static int call_defined_word(const uint8_t * defined_word_ptr, stack_t * stack)
-{
-    int ret = 0;
-    ectx_t * c = (ectx_t *) stack;
-    RETURN_PUSH(c->return_stack_len_base);
-    RETURN_PUSH(NULL);
-    c->return_stack_len_base = c->return_stack.len;
-    const uint8_t * pc_save = c->pc;
-    c->pc = defined_word_ptr;
-    ret = run_inner(c);
-    c->pc = pc_save;
-    return ret;
-}
-
-const mcp_forth_engine_t compact_bytecode_vm_engine = {
-    .run=run,
-    .call_defined_word=call_defined_word
-};

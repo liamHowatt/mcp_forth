@@ -1,14 +1,18 @@
+#include "mcp_forth.h"
 #include <fcntl.h>
 #include <unistd.h>
-#include "mcp_forth.h"
+#include <stdlib.h>
+#include <stdio.h>
 
 int main(int argc, char ** argv)
 {
     assert(argc == 4);
 
-    const mcp_forth_backend_t * backend;
+    const m4_backend_t * backend;
     if(0 == strcmp("vm", argv[1])) {
-        backend = &compact_bytecode_vm_backend;
+        backend = &m4_compact_bytecode_vm_backend;
+    } else if(0 == strcmp("x86", argv[1])) {
+        backend = &m4_x86_32_backend;
     } else {
         assert(0);
     }
@@ -34,7 +38,7 @@ int main(int argc, char ** argv)
 
     uint8_t * bin;
     int error_near = -1;
-    int bin_len = mcp_forth_compile(source, source_len, &bin, backend, &error_near);
+    int bin_len = m4_compile(source, source_len, &bin, backend, &error_near);
     free(source);
     if(bin_len < 0) {
         printf("error %d near %d\n", bin_len, error_near);

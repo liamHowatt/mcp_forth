@@ -1,4 +1,5 @@
 #include "mcp_forth.h"
+#include <stdlib.h>
 
 #define UNKNOWN_ERROR                                          -1
 #define NOT_ALLOWED_INSIDE_WORD_ERROR                          -2
@@ -7,12 +8,13 @@
 #define WORD_USED_BEFORE_DEFINED_ERROR                         -5
 #define UNEXPECTED_SEMICOLON_ERROR                             -6
 #define NOT_ALLOWED_OUTSIDE_WORD_ERROR                         -7
-#define VARIABLE_REDEFINED_ERROR                               -8
+#define VARIABLE_OR_CONSTANT_REDEFINED_ERROR                   -8
 #define WRONG_TERMINATOR_FOR_THIS_CONTROL_FLOW_ERROR           -9
 #define UNTERMINATED_CONTROL_FLOW_ERROR                       -10
 #define UNEXPECTED_CONTROL_FLOW_TERMINATOR_ERROR              -11
 #define LOOP_INDEX_USED_OUTSIDE_LOOP                          -12
 #define TICK_OPERATOR_COULD_NOT_FIND_DEFINED_WORD_ERROR       -13
+#define INVALID_DEFINED_WORD_PARENTHESIS_FOR_C_CALLBACK_ERROR -14
 
 #define NSTRING_LITERAL(lit) {.str = (lit), .len = sizeof(lit) - 1}
 #define ARRAY_LEN(arr) (sizeof(arr) / sizeof(*(arr)))
@@ -47,7 +49,7 @@ typedef struct {
         CONTROL_FLOW_TYPE_BEGIN,
         CONTROL_FLOW_TYPE_WHILE
     } type;
-    fragment_t * fragment;
+    int fragment;
 } control_flow_t;
 
 static const nstring_t builtins[] = {
@@ -91,6 +93,23 @@ static const nstring_t builtins[] = {
     NSTRING_LITERAL("2drop"),
     NSTRING_LITERAL("move"),
     NSTRING_LITERAL("execute"),
+    NSTRING_LITERAL("align"),
+    NSTRING_LITERAL(","),
+    NSTRING_LITERAL("compare"),
+    NSTRING_LITERAL("<>"),
+    NSTRING_LITERAL(">r"),
+    NSTRING_LITERAL("r>"),
+    NSTRING_LITERAL("2>r"),
+    NSTRING_LITERAL("2r>"),
+    NSTRING_LITERAL("2/"),
+    NSTRING_LITERAL("2dup"),
+    NSTRING_LITERAL("0<>"),
+    NSTRING_LITERAL("0>"),
+    NSTRING_LITERAL("w@"),
+    NSTRING_LITERAL("w!"),
+    NSTRING_LITERAL("+!"),
+    NSTRING_LITERAL("/"),
+    NSTRING_LITERAL("cells"),
 };
 
 static bool next_word(source_scanner_t * ss)
@@ -245,18 +264,22 @@ static int find_nstring(const nstring_t * nstrings, int nstrings_len, const char
     return -1;
 }
 
-static fragment_t * backend_create_fragment(const mcp_forth_backend_t * backend, opcode_t op, void * param, bool is_word_fragment)
+static int create_fragment(m4_fragment_t ** all_fragments, m4_opcode_t op, int param, bool is_word_fragment)
 {
-    fragment_t * fragment = backend->create_fragment(op, param);
-    fragment->position = 0; /* initial guess (bad) */
-    fragment->is_word_fragment = is_word_fragment;
-    return fragment;
+    m4_fragment_t fragment = {
+        .param = param,
+        .position = 0, /* initial guess (bad) */
+        .op = op,
+        .is_word_fragment = is_word_fragment
+    };
+    grow_array_add(all_fragments, &fragment);
+    return grow_array_get_len(*all_fragments) - 1;
 }
 
-static fragment_t * fragment_helper(fragment_t *** fragments, const mcp_forth_backend_t * backend, opcode_t op, void * param, bool is_word_fragment)
+static int sequence_helper(m4_fragment_t ** all_fragments, int ** sequence, m4_opcode_t op, int param, bool is_word_fragment)
 {
-    fragment_t * fragment = backend_create_fragment(backend, op, param, is_word_fragment);
-    grow_array_add(fragments, &fragment);
+    int fragment = create_fragment(all_fragments, op, param, is_word_fragment);
+    grow_array_add(sequence, &fragment);
     return fragment;
 }
 
@@ -332,23 +355,25 @@ static bool parse_literal(int * literal_out, const char * word, int word_len)
     return true;
 }
 
-int mcp_forth_compile(
+int m4_compile(
     const char * source,
     int source_len,
     uint8_t ** bin_out,
-    const mcp_forth_backend_t * backend,
+    const m4_backend_t * backend,
     int * error_near
 ) {
-    int arr_len, arr_len2;
+    int arr_len;
 
     int ret = UNKNOWN_ERROR;
-    fragment_t ** fragments = grow_array_create(sizeof(fragment_t *));
+    m4_fragment_t * all_fragments = grow_array_create(sizeof(m4_fragment_t));
+    int * sequence = grow_array_create(sizeof(int));
     nstring_t * defined_word_nstrings = grow_array_create(sizeof(nstring_t));
-    fragment_t ** defined_word_fragments = grow_array_create(sizeof(fragment_t *));
+    int * defined_word_fragments = grow_array_create(sizeof(int));
     nstring_t * runtime_word_nstrings = grow_array_create(sizeof(nstring_t));
     nstring_t * data_nstrings = grow_array_create(sizeof(nstring_t));
     nstring_t * variable_nstrings = grow_array_create(sizeof(nstring_t));
     control_flow_t * control_flow_stack = grow_array_create(sizeof(control_flow_t));
+    int * defined_words_that_need_callbacks = grow_array_create(sizeof(int));
 
     source_scanner_t ss = {.cur=source, .end=source+source_len};
 
@@ -361,7 +386,7 @@ int mcp_forth_compile(
         /* builtin words */
         word_i = find_nstring(builtins, ARRAY_LEN(builtins), ss.word, ss.word_len, false);
         if(word_i != -1) {
-            fragment_helper(&fragments, backend, OPCODE_BUILTIN_WORD, &word_i, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_BUILTIN_WORD, word_i, defining_word);
 
             /* special check for i and j */
             if(EQUAL_STRING_LITERAL("i", builtins[word_i].str, builtins[word_i].len, false)
@@ -385,14 +410,14 @@ int mcp_forth_compile(
         /* defined words */
         word_i = find_nstring(defined_word_nstrings, grow_array_get_len(defined_word_nstrings), ss.word, ss.word_len, false);
         if(word_i != -1) {
-            fragment_helper(&fragments, backend, OPCODE_DEFINED_WORD, defined_word_fragments[word_i], defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_DEFINED_WORD, defined_word_fragments[word_i], defining_word);
             continue;
         }
 
-        /* variables */
+        /* variables and constants */
         word_i = find_nstring(variable_nstrings, grow_array_get_len(variable_nstrings), ss.word, ss.word_len, false);
         if(word_i != -1) {
-            fragment_helper(&fragments, backend, OPCODE_USE_VARIABLE, &word_i, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_USE_VARIABLE_OR_CONSTANT, word_i, defining_word);
             continue;
         }
 
@@ -404,28 +429,54 @@ int mcp_forth_compile(
             RASSERT(-1 == find_nstring(builtins, ARRAY_LEN(builtins), ss.word, ss.word_len, false), WORD_REDEFINED_ERROR);
             RASSERT(-1 == find_nstring(defined_word_nstrings, grow_array_get_len(defined_word_nstrings), ss.word, ss.word_len, false), WORD_REDEFINED_ERROR);
             RASSERT(-1 == find_nstring(runtime_word_nstrings, grow_array_get_len(runtime_word_nstrings), ss.word, ss.word_len, false), WORD_USED_BEFORE_DEFINED_ERROR);
-            RASSERT(-1 == find_nstring(variable_nstrings, grow_array_get_len(variable_nstrings), ss.word, ss.word_len, false), VARIABLE_REDEFINED_ERROR);
+            RASSERT(-1 == find_nstring(variable_nstrings, grow_array_get_len(variable_nstrings), ss.word, ss.word_len, false), VARIABLE_OR_CONSTANT_REDEFINED_ERROR);
             RASSERT(0 == grow_array_get_len(control_flow_stack), UNTERMINATED_CONTROL_FLOW_ERROR);
             defining_word = true;
             nstring_t new_defined_word = {.str=ss.word, .len=ss.word_len};
             grow_array_add(&defined_word_nstrings, &new_defined_word);
-            fragment_t * fragment = fragment_helper(&fragments, backend, OPCODE_DEFINED_WORD_LOCATION, NULL, defining_word);
+            int fragment = sequence_helper(&all_fragments, &sequence, M4_OPCODE_DEFINED_WORD_LOCATION, -1, defining_word);
             grow_array_add(&defined_word_fragments, &fragment);
         }
         else if(EQUAL_STRING_LITERAL(";", ss.word, ss.word_len, false)) {
             RASSERT(defining_word, UNEXPECTED_SEMICOLON_ERROR);
             RASSERT(0 == grow_array_get_len(control_flow_stack), UNTERMINATED_CONTROL_FLOW_ERROR);
-            fragment_helper(&fragments, backend, OPCODE_EXIT_WORD, NULL, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_EXIT_WORD, -1, defining_word);
             defining_word = false;
         }
         else if(EQUAL_STRING_LITERAL("exit", ss.word, ss.word_len, false)) {
             RASSERT(defining_word, NOT_ALLOWED_OUTSIDE_WORD_ERROR);
-            fragment_helper(&fragments, backend, OPCODE_EXIT_WORD, NULL, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_EXIT_WORD, -1, defining_word);
         }
         else if(EQUAL_STRING_LITERAL("(", ss.word, ss.word_len, false)) {
-            do {
-                RASSERT(next_word(&ss), EARLY_END_OF_SOURCE_ERROR);
-            } while(ss.word[ss.word_len - 1] != ')');
+            if(defining_word && all_fragments[sequence[grow_array_get_len(sequence) - 1]].op == M4_OPCODE_DEFINED_WORD_LOCATION) {
+                int param_count = 0;
+                int return_count = 0;
+                bool divider_found = false;
+                do {
+                    RASSERT(next_word(&ss), EARLY_END_OF_SOURCE_ERROR);
+                    if (EQUAL_STRING_LITERAL("--", ss.word, ss.word_len, false)) {
+                        divider_found = true;
+                    }
+                    else if (ss.word_len > 1 || ss.word[0] != ')') {
+                        if(!divider_found) {
+                            param_count++;
+                        } else {
+                            return_count++;
+                        }
+                    }
+                } while(ss.word[ss.word_len - 1] != ')');
+                int ext_param = 1 << 2;
+                ext_param |= (return_count > 0x03 ? 0x03 : return_count) & 0x03;
+                ext_param <<= 5;
+                ext_param |= (param_count > 0x1f ? 0x1f : param_count) & 0x1f;
+                m4_fragment_t * fragment = &all_fragments[defined_word_fragments[grow_array_get_len(defined_word_fragments) - 1]];
+                fragment->ext_param = ext_param;
+            }
+            else {
+                do {
+                    RASSERT(next_word(&ss), EARLY_END_OF_SOURCE_ERROR);
+                } while(ss.word[ss.word_len - 1] != ')');
+            }
         }
         else if(EQUAL_STRING_LITERAL(".\"", ss.word, ss.word_len, false) || EQUAL_STRING_LITERAL("s\"", ss.word, ss.word_len, false)) {
             bool is_dot_quote = ss.word[0] == '.';
@@ -445,11 +496,11 @@ int mcp_forth_compile(
             }
             int data_offset = 0;
             for(int i=0; i<data_i; i++) {
-                data_offset += data_nstrings[i].len;
+                data_offset += data_nstrings[i].len + 1;
             }
 
-            fragment_helper(&fragments, backend, OPCODE_PUSH_DATA_ADDRESS, &data_offset, defining_word);
-            fragment_helper(&fragments, backend, OPCODE_PUSH_LITERAL, &string_len, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_PUSH_DATA_ADDRESS, data_offset, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_PUSH_LITERAL, string_len, defining_word);
 
             if(is_dot_quote) {
                 int type_i = FIND_NSTRING_LITERAL(runtime_word_nstrings, grow_array_get_len(runtime_word_nstrings), "type", false);
@@ -459,28 +510,30 @@ int mcp_forth_compile(
                     grow_array_add(&runtime_word_nstrings, &type_nstring);
                 }
 
-                fragment_helper(&fragments, backend, OPCODE_RUNTIME_WORD, &type_i, defining_word);
+                sequence_helper(&all_fragments, &sequence, M4_OPCODE_RUNTIME_WORD, type_i, defining_word);
             }
         }
         else if(EQUAL_STRING_LITERAL("recurse", ss.word, ss.word_len, false)) {
             RASSERT(defining_word, NOT_ALLOWED_OUTSIDE_WORD_ERROR);
-            fragment_helper(&fragments, backend, OPCODE_DEFINED_WORD, defined_word_fragments[grow_array_get_len(defined_word_fragments) - 1], defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_DEFINED_WORD, defined_word_fragments[grow_array_get_len(defined_word_fragments) - 1], defining_word);
         }
-        else if(EQUAL_STRING_LITERAL("variable", ss.word, ss.word_len, false)) {
+        else if(EQUAL_STRING_LITERAL("variable", ss.word, ss.word_len, false) || EQUAL_STRING_LITERAL("constant", ss.word, ss.word_len, false)) {
+            bool is_constant = ss.word[0] == 'c';
             RASSERT(!defining_word, NOT_ALLOWED_INSIDE_WORD_ERROR);
             RASSERT(next_word(&ss), EARLY_END_OF_SOURCE_ERROR);
             RASSERT(-1 == find_nstring(builtins, ARRAY_LEN(builtins), ss.word, ss.word_len, false), WORD_REDEFINED_ERROR);
             RASSERT(-1 == find_nstring(defined_word_nstrings, grow_array_get_len(defined_word_nstrings), ss.word, ss.word_len, false), WORD_REDEFINED_ERROR);
             RASSERT(-1 == find_nstring(runtime_word_nstrings, grow_array_get_len(runtime_word_nstrings), ss.word, ss.word_len, false), WORD_USED_BEFORE_DEFINED_ERROR);
-            RASSERT(-1 == find_nstring(variable_nstrings, grow_array_get_len(variable_nstrings), ss.word, ss.word_len, false), VARIABLE_REDEFINED_ERROR);
+            RASSERT(-1 == find_nstring(variable_nstrings, grow_array_get_len(variable_nstrings), ss.word, ss.word_len, false), VARIABLE_OR_CONSTANT_REDEFINED_ERROR);
             int variable_i = grow_array_get_len(variable_nstrings);
             nstring_t new_variable = {.str=ss.word, .len=ss.word_len};
             grow_array_add(&variable_nstrings, &new_variable);
-            fragment_helper(&fragments, backend, OPCODE_DECLARE_VARIABLE, &variable_i, defining_word);
+            sequence_helper(&all_fragments, &sequence, is_constant ? M4_OPCODE_DECLARE_CONSTANT : M4_OPCODE_DECLARE_VARIABLE,
+                            variable_i, defining_word);
         }
         else if(EQUAL_STRING_LITERAL("if", ss.word, ss.word_len, false)) {
-            fragment_t * branch_location_fragment = backend_create_fragment(backend, OPCODE_BRANCH_LOCATION, NULL, defining_word);
-            fragment_helper(&fragments, backend, OPCODE_BRANCH_IF_ZERO, branch_location_fragment, defining_word);
+            int branch_location_fragment = create_fragment(&all_fragments, M4_OPCODE_BRANCH_LOCATION, -1, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_BRANCH_IF_ZERO, branch_location_fragment, defining_word);
             control_flow_t cf = {.type=CONTROL_FLOW_TYPE_IF, .fragment=branch_location_fragment};
             grow_array_add(&control_flow_stack, &cf);
         }
@@ -489,7 +542,7 @@ int mcp_forth_compile(
             RASSERT(arr_len != 0, UNEXPECTED_CONTROL_FLOW_TERMINATOR_ERROR);
             control_flow_t * top_cf = &control_flow_stack[arr_len - 1];
             RASSERT(top_cf->type == CONTROL_FLOW_TYPE_IF || top_cf->type == CONTROL_FLOW_TYPE_ELSE, WRONG_TERMINATOR_FOR_THIS_CONTROL_FLOW_ERROR);
-            grow_array_add(&fragments, &top_cf->fragment);
+            grow_array_add(&sequence, &top_cf->fragment);
             grow_array_drop_end(control_flow_stack);
         }
         else if(EQUAL_STRING_LITERAL("else", ss.word, ss.word_len, false)) {
@@ -498,17 +551,17 @@ int mcp_forth_compile(
             control_flow_t * top_cf = &control_flow_stack[arr_len - 1];
             RASSERT(top_cf->type == CONTROL_FLOW_TYPE_IF, WRONG_TERMINATOR_FOR_THIS_CONTROL_FLOW_ERROR);
 
-            fragment_t * branch_location_fragment = backend_create_fragment(backend, OPCODE_BRANCH_LOCATION, NULL, defining_word);
-            fragment_helper(&fragments, backend, OPCODE_BRANCH, branch_location_fragment, defining_word);
+            int branch_location_fragment = create_fragment(&all_fragments, M4_OPCODE_BRANCH_LOCATION, -1, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_BRANCH, branch_location_fragment, defining_word);
 
-            grow_array_add(&fragments, &top_cf->fragment);
+            grow_array_add(&sequence, &top_cf->fragment);
 
             top_cf->fragment = branch_location_fragment;
             top_cf->type = CONTROL_FLOW_TYPE_ELSE;
         }
         else if(EQUAL_STRING_LITERAL("do", ss.word, ss.word_len, false)) {
-            fragment_helper(&fragments, backend, OPCODE_DO, NULL, defining_word);
-            fragment_t * branch_location_fragment = fragment_helper(&fragments, backend, OPCODE_BRANCH_LOCATION, NULL, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_DO, -1, defining_word);
+            int branch_location_fragment = sequence_helper(&all_fragments, &sequence, M4_OPCODE_BRANCH_LOCATION, -1, defining_word);
             control_flow_t cf = {.type=CONTROL_FLOW_TYPE_DO, .fragment=branch_location_fragment};
             grow_array_add(&control_flow_stack, &cf);
         }
@@ -517,11 +570,11 @@ int mcp_forth_compile(
             RASSERT(arr_len != 0, UNEXPECTED_CONTROL_FLOW_TERMINATOR_ERROR);
             control_flow_t * top_cf = &control_flow_stack[arr_len - 1];
             RASSERT(top_cf->type == CONTROL_FLOW_TYPE_DO, WRONG_TERMINATOR_FOR_THIS_CONTROL_FLOW_ERROR);
-            fragment_helper(&fragments, backend, OPCODE_LOOP, top_cf->fragment, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_LOOP, top_cf->fragment, defining_word);
             grow_array_drop_end(control_flow_stack);
         }
         else if(EQUAL_STRING_LITERAL("begin", ss.word, ss.word_len, false)) {
-            fragment_t * branch_location_fragment = fragment_helper(&fragments, backend, OPCODE_BRANCH_LOCATION, NULL, defining_word);
+            int branch_location_fragment = sequence_helper(&all_fragments, &sequence, M4_OPCODE_BRANCH_LOCATION, -1, defining_word);
             control_flow_t cf = {.type=CONTROL_FLOW_TYPE_BEGIN, .fragment=branch_location_fragment};
             grow_array_add(&control_flow_stack, &cf);
         }
@@ -530,7 +583,7 @@ int mcp_forth_compile(
             RASSERT(arr_len != 0, UNEXPECTED_CONTROL_FLOW_TERMINATOR_ERROR);
             control_flow_t * top_cf = &control_flow_stack[arr_len - 1];
             RASSERT(top_cf->type == CONTROL_FLOW_TYPE_BEGIN, WRONG_TERMINATOR_FOR_THIS_CONTROL_FLOW_ERROR);
-            fragment_helper(&fragments, backend, OPCODE_BRANCH_IF_ZERO, top_cf->fragment, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_BRANCH_IF_ZERO, top_cf->fragment, defining_word);
             grow_array_drop_end(control_flow_stack);
         }
         else if(EQUAL_STRING_LITERAL("while", ss.word, ss.word_len, false)) {
@@ -538,8 +591,8 @@ int mcp_forth_compile(
             RASSERT(arr_len != 0, UNEXPECTED_CONTROL_FLOW_TERMINATOR_ERROR);
             control_flow_t * top_cf = &control_flow_stack[arr_len - 1];
             RASSERT(top_cf->type == CONTROL_FLOW_TYPE_BEGIN, WRONG_TERMINATOR_FOR_THIS_CONTROL_FLOW_ERROR);
-            fragment_t * branch_location_fragment = backend_create_fragment(backend, OPCODE_BRANCH_LOCATION, NULL, defining_word);
-            fragment_helper(&fragments, backend, OPCODE_BRANCH_IF_ZERO, branch_location_fragment, defining_word);
+            int branch_location_fragment = create_fragment(&all_fragments, M4_OPCODE_BRANCH_LOCATION, -1, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_BRANCH_IF_ZERO, branch_location_fragment, defining_word);
             control_flow_t cf = {.type=CONTROL_FLOW_TYPE_WHILE, .fragment=branch_location_fragment};
             grow_array_add(&control_flow_stack, &cf);
         }
@@ -551,8 +604,8 @@ int mcp_forth_compile(
             RASSERT(while_cf->type == CONTROL_FLOW_TYPE_WHILE, WRONG_TERMINATOR_FOR_THIS_CONTROL_FLOW_ERROR);
             control_flow_t * begin_cf = &control_flow_stack[arr_len - 2];
             assert(begin_cf->type == CONTROL_FLOW_TYPE_BEGIN);
-            fragment_helper(&fragments, backend, OPCODE_BRANCH, begin_cf->fragment, defining_word);
-            grow_array_add(&fragments, &while_cf->fragment);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_BRANCH, begin_cf->fragment, defining_word);
+            grow_array_add(&sequence, &while_cf->fragment);
             grow_array_drop_end(control_flow_stack);
             grow_array_drop_end(control_flow_stack);
         }
@@ -561,7 +614,7 @@ int mcp_forth_compile(
             RASSERT(arr_len != 0, UNEXPECTED_CONTROL_FLOW_TERMINATOR_ERROR);
             control_flow_t * top_cf = &control_flow_stack[arr_len - 1];
             RASSERT(top_cf->type == CONTROL_FLOW_TYPE_BEGIN, WRONG_TERMINATOR_FOR_THIS_CONTROL_FLOW_ERROR);
-            fragment_helper(&fragments, backend, OPCODE_BRANCH, top_cf->fragment, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_BRANCH, top_cf->fragment, defining_word);
             grow_array_drop_end(control_flow_stack);
         }
         else if(EQUAL_STRING_LITERAL("\\", ss.word, ss.word_len, false)) {
@@ -571,12 +624,38 @@ int mcp_forth_compile(
             RASSERT(next_word(&ss), EARLY_END_OF_SOURCE_ERROR);
             int defined_i = find_nstring(defined_word_nstrings, grow_array_get_len(defined_word_nstrings), ss.word, ss.word_len, false);
             RASSERT(defined_i != -1, TICK_OPERATOR_COULD_NOT_FIND_DEFINED_WORD_ERROR);
-            fragment_helper(&fragments, backend, OPCODE_PUSH_OFFSET_ADDRESS, defined_word_fragments[defined_i], defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_PUSH_OFFSET_ADDRESS, defined_word_fragments[defined_i], defining_word);
+        }
+        else if(EQUAL_STRING_LITERAL("c'", ss.word, ss.word_len, false)) {
+            /* non-standard "create C callback from defined word" */
+            RASSERT(next_word(&ss), EARLY_END_OF_SOURCE_ERROR);
+            int defined_word_i = find_nstring(defined_word_nstrings, grow_array_get_len(defined_word_nstrings), ss.word, ss.word_len, false);
+            RASSERT(defined_word_i != -1, TICK_OPERATOR_COULD_NOT_FIND_DEFINED_WORD_ERROR);
+            int callback_i = -1;
+            arr_len = grow_array_get_len(defined_words_that_need_callbacks);
+            for (int i = 0; i < arr_len; i++) {
+                if(defined_word_i == defined_words_that_need_callbacks[i]) {
+                    callback_i = i;
+                    break;
+                }
+            }
+            if(callback_i == -1) {
+                m4_fragment_t * fragment = &all_fragments[defined_word_fragments[defined_word_i]];
+                int ext_param = fragment->ext_param;
+                RASSERT(ext_param, INVALID_DEFINED_WORD_PARENTHESIS_FOR_C_CALLBACK_ERROR);
+                int n_parameters = ext_param & 0x1f;
+                ext_param >>= 5;
+                int n_return_vals = ext_param & 0x03;
+                RASSERT(n_parameters >= 1 && n_parameters <= 8 && n_return_vals <= 1, INVALID_DEFINED_WORD_PARENTHESIS_FOR_C_CALLBACK_ERROR);
+                callback_i = grow_array_get_len(defined_words_that_need_callbacks);
+                grow_array_add(&defined_words_that_need_callbacks, &defined_word_i);
+            }
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_PUSH_CALLBACK, callback_i, defining_word);
         }
         else {
             int literal;
             if(parse_literal(&literal, ss.word, ss.word_len)) {
-                fragment_helper(&fragments, backend, OPCODE_PUSH_LITERAL, &literal, defining_word);
+                sequence_helper(&all_fragments, &sequence, M4_OPCODE_PUSH_LITERAL, literal, defining_word);
             }
             else {
                 intrinsic_found = false;
@@ -593,21 +672,21 @@ int mcp_forth_compile(
             nstring_t runtime_word_nstring = {.str=ss.word, .len=ss.word_len};
             grow_array_add(&runtime_word_nstrings, &runtime_word_nstring);
         }
-        fragment_helper(&fragments, backend, OPCODE_RUNTIME_WORD, &word_i, defining_word);
+        sequence_helper(&all_fragments, &sequence, M4_OPCODE_RUNTIME_WORD, word_i, defining_word);
     }
 
     /* halt */
     RASSERT(!defining_word && 0 == grow_array_get_len(control_flow_stack), EARLY_END_OF_SOURCE_ERROR);
-    fragment_helper(&fragments, backend, OPCODE_HALT, NULL, defining_word);
+    sequence_helper(&all_fragments, &sequence, M4_OPCODE_HALT, -1, defining_word);
 
     /* move main program fragments to front */
-    arr_len = grow_array_get_len(fragments);
+    arr_len = grow_array_get_len(sequence);
     int main_program_i = 0;
     for(int i=0; i<arr_len; i++) {
-        if(!fragments[i]->is_word_fragment) {
-            fragment_t * fragment_from_main_program = fragments[i];
-            memmove(&fragments[main_program_i + 1], &fragments[main_program_i], (i - main_program_i) * sizeof(fragment_t *));
-            fragments[main_program_i++] = fragment_from_main_program;
+        if(!all_fragments[sequence[i]].is_word_fragment) {
+            int fragment_from_main_program = sequence[i];
+            memmove(&sequence[main_program_i + 1], &sequence[main_program_i], (i - main_program_i) * sizeof(int));
+            sequence[main_program_i++] = fragment_from_main_program;
         }
     }
 
@@ -616,49 +695,61 @@ int mcp_forth_compile(
     while(!solved) {
         solved = true;
         int position = 0;
-        arr_len = grow_array_get_len(fragments);
+        arr_len = grow_array_get_len(sequence);
         for(int i=0; i<arr_len; i++) {
-            if(fragments[i]->position != position) {
-                fragments[i]->position = position;
+            if(all_fragments[sequence[i]].position != position) {
+                all_fragments[sequence[i]].position = position;
                 solved = false;
             }
-            position += backend->fragment_bin_size(fragments[i]);
+            position += backend->fragment_bin_size(all_fragments, sequence, arr_len, i);
         }
     }
 
     /* dump bin */
     int bin_len = 0;
 
-    int runtime_words_len = 0;
+    bin_len += m4_num_encoded_size_from_int(grow_array_get_len(variable_nstrings));
+
     arr_len = grow_array_get_len(runtime_word_nstrings);
+    bin_len += m4_num_encoded_size_from_int(arr_len);
+    int runtime_words_len = 0;
     for(int i=0; i<arr_len; i++) {
         runtime_words_len += runtime_word_nstrings[i].len + 1;
     }
-    bin_len += num_encoded_size_from_int(runtime_words_len);
     bin_len += runtime_words_len;
 
     int data_len = 0;
     arr_len = grow_array_get_len(data_nstrings);
     for(int i=0; i<arr_len; i++) {
-        data_len += data_nstrings[i].len;
+        data_len += data_nstrings[i].len + 1;
     }
-    bin_len += num_encoded_size_from_int(data_len);
+    bin_len += m4_num_encoded_size_from_int(data_len);
     bin_len += data_len;
 
-    bin_len += num_encoded_size_from_int(grow_array_get_len(variable_nstrings));
-
-    arr_len = grow_array_get_len(fragments);
+    arr_len = grow_array_get_len(defined_words_that_need_callbacks);
+    bin_len += m4_num_encoded_size_from_int(arr_len);
+    int callback_info_len = 0;
     for(int i=0; i<arr_len; i++) {
-        bin_len += backend->fragment_bin_size(fragments[i]);
+        callback_info_len += 1 + m4_num_encoded_size_from_int(all_fragments[defined_word_fragments[defined_words_that_need_callbacks[i]]].position);
+    }
+    bin_len += callback_info_len;
+
+    arr_len = grow_array_get_len(sequence);
+    for(int i=0; i<arr_len; i++) {
+        bin_len += backend->fragment_bin_size(all_fragments, sequence, arr_len, i);
     }
 
     uint8_t * bin = malloc(bin_len);
     assert(bin);
     uint8_t * bin_p = bin;
 
-    num_encode(runtime_words_len, bin_p);
-    bin_p += num_encoded_size_from_int(runtime_words_len);
+    arr_len = grow_array_get_len(variable_nstrings);
+    m4_num_encode(arr_len, bin_p);
+    bin_p += m4_num_encoded_size_from_encoded(bin_p);
+
     arr_len = grow_array_get_len(runtime_word_nstrings);
+    m4_num_encode(arr_len, bin_p);
+    bin_p += m4_num_encoded_size_from_encoded(bin_p);
     for(int i=0; i<arr_len; i++) {
         const char * str = runtime_word_nstrings[i].str;
         int str_len = runtime_word_nstrings[i].len;
@@ -670,22 +761,33 @@ int mcp_forth_compile(
         *(bin_p++) = '\0';
     }
 
-    num_encode(data_len, bin_p);
-    bin_p += num_encoded_size_from_int(data_len);
+    m4_num_encode(data_len, bin_p);
+    bin_p += m4_num_encoded_size_from_encoded(bin_p);
     arr_len = grow_array_get_len(data_nstrings);
     for(int i=0; i<arr_len; i++) {
         memcpy(bin_p, data_nstrings[i].str, data_nstrings[i].len);
         bin_p += data_nstrings[i].len;
+        *(bin_p++) = '\0';
     }
 
-    arr_len = grow_array_get_len(variable_nstrings);
-    num_encode(arr_len, bin_p);
-    bin_p += num_encoded_size_from_int(arr_len);
-
-    arr_len = grow_array_get_len(fragments);
+    arr_len = grow_array_get_len(defined_words_that_need_callbacks);
+    m4_num_encode(arr_len, bin_p);
+    bin_p += m4_num_encoded_size_from_encoded(bin_p);
     for(int i=0; i<arr_len; i++) {
-        backend->fragment_bin_get(fragments[i], bin_p);
-        bin_p += backend->fragment_bin_size(fragments[i]);
+        m4_fragment_t * fragment = &all_fragments[defined_word_fragments[defined_words_that_need_callbacks[i]]];
+        int ext_param = fragment->ext_param;
+        int params_info = ext_param & 0x1f;
+        params_info <<= 1;
+        if(ext_param & 0x60) params_info |= 1;
+        *(bin_p++) = params_info;
+        m4_num_encode(fragment->position, bin_p);
+        bin_p += m4_num_encoded_size_from_encoded(bin_p);
+    }
+
+    arr_len = grow_array_get_len(sequence);
+    for(int i=0; i<arr_len; i++) {
+        backend->fragment_bin_dump(all_fragments, sequence, arr_len, i, bin_p);
+        bin_p += backend->fragment_bin_size(all_fragments, sequence, arr_len, i);
     }
 
     *bin_out = bin;
@@ -693,29 +795,14 @@ int mcp_forth_compile(
 end:
     if(error_near) *error_near = ss.word - source;
 
-    arr_len = grow_array_get_len(control_flow_stack);
-    arr_len2 = grow_array_get_len(fragments);
-    for(int i=0; i<arr_len; i++) {
-        bool found_in_fragments = false;
-        for(int j=0; j<arr_len2; j++) {
-            if(control_flow_stack[i].fragment == fragments[j]) {
-                found_in_fragments = true;
-                break;
-            }
-        }
-        if(found_in_fragments) continue;
-        backend->destroy_fragment(control_flow_stack[i].fragment);
-    }
+    grow_array_destroy(defined_words_that_need_callbacks);
     grow_array_destroy(control_flow_stack);
     grow_array_destroy(variable_nstrings);
     grow_array_destroy(data_nstrings);
     grow_array_destroy(runtime_word_nstrings);
     grow_array_destroy(defined_word_fragments);
     grow_array_destroy(defined_word_nstrings);
-    arr_len = grow_array_get_len(fragments);
-    for(int i=0; i<arr_len; i++) {
-        backend->destroy_fragment(fragments[i]);
-    }
-    grow_array_destroy(fragments);
+    grow_array_destroy(sequence);
+    grow_array_destroy(all_fragments);
     return ret;
 }

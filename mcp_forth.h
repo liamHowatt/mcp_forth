@@ -1,97 +1,140 @@
 #pragma once
 #include <stdint.h>
-#include <stdlib.h>
 #include <assert.h>
-#include <stdio.h>
 #include <limits.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stddef.h>
 
-#define RUNTIME_WORD_MISSING_ERROR 1000
-
-#define STACK_UNDERFLOW_ERROR           1
-#define STACK_OVERFLOW_ERROR            2
-#define RETURN_STACK_OVERFLOW_ERROR     3
-#define OUT_OF_MEMORY_ERROR             4
+#define M4_RUNTIME_WORD_MISSING_ERROR             1
+#define M4_STACK_UNDERFLOW_ERROR                  2
+#define M4_STACK_OVERFLOW_ERROR                   3
+#define M4_RETURN_STACK_OVERFLOW_ERROR            4
+#define M4_OUT_OF_MEMORY_ERROR                    5
+#define M4_TOO_MANY_CALLBACKS_ERROR               6
+#define M4_TOO_MANY_VAR_ARGS_ERROR                7
+#define M4_DATA_SPACE_POINTER_OUT_OF_BOUNDS_ERROR 8
 
 typedef enum {
-    OPCODE_BUILTIN_WORD,
-    OPCODE_DEFINED_WORD,
-    OPCODE_RUNTIME_WORD,
-    OPCODE_PUSH_LITERAL,
-    OPCODE_EXIT_WORD,
-    OPCODE_DEFINED_WORD_LOCATION,
-    OPCODE_PUSH_DATA_ADDRESS,
-    OPCODE_DECLARE_VARIABLE,
-    OPCODE_USE_VARIABLE,
-    OPCODE_HALT,
-    OPCODE_BRANCH_LOCATION,
-    OPCODE_BRANCH_IF_ZERO,
-    OPCODE_BRANCH,
-    OPCODE_DO,
-    OPCODE_LOOP,
-    OPCODE_PUSH_OFFSET_ADDRESS,
-    OPCODE_LAST_
-} opcode_t;
+    M4_OPCODE_BUILTIN_WORD,
+    M4_OPCODE_DEFINED_WORD,
+    M4_OPCODE_RUNTIME_WORD,
+    M4_OPCODE_PUSH_LITERAL,
+    M4_OPCODE_EXIT_WORD,
+    M4_OPCODE_DEFINED_WORD_LOCATION,
+    M4_OPCODE_PUSH_DATA_ADDRESS,
+    M4_OPCODE_DECLARE_VARIABLE,
+    M4_OPCODE_USE_VARIABLE_OR_CONSTANT,
+    M4_OPCODE_HALT,
+    M4_OPCODE_BRANCH_LOCATION,
+    M4_OPCODE_BRANCH_IF_ZERO,
+    M4_OPCODE_BRANCH,
+    M4_OPCODE_DO,
+    M4_OPCODE_LOOP,
+    M4_OPCODE_PUSH_OFFSET_ADDRESS,
+    M4_OPCODE_PUSH_CALLBACK,
+    M4_OPCODE_DECLARE_CONSTANT,
+    M4_OPCODE_LAST_
+} m4_opcode_t;
 
 typedef struct {
+    int param;
     int position;
+    uint16_t op;
     bool is_word_fragment;
-} fragment_t;
+    uint8_t ext_param;
+} m4_fragment_t;
 
 typedef struct {
-    fragment_t * (*create_fragment)(opcode_t op, void * param);
-    void (*destroy_fragment)(fragment_t *);
-    int (*fragment_bin_size)(fragment_t *);
-    void (*fragment_bin_get)(fragment_t *, uint8_t * dst);
-} mcp_forth_backend_t;
+    int (*fragment_bin_size)(const m4_fragment_t * all_fragments, const int * sequence, int sequence_len, int sequence_i);
+    void (*fragment_bin_dump)(const m4_fragment_t * all_fragments, const int * sequence, int sequence_len, int sequence_i, uint8_t * dst);
+} m4_backend_t;
 
-extern const mcp_forth_backend_t compact_bytecode_vm_backend;
-
-int mcp_forth_compile(
+int m4_compile(
     const char * source,
     int source_len,
     uint8_t ** bin_out,
-    const mcp_forth_backend_t * backend,
+    const m4_backend_t * backend,
     int * error_near
 );
 
-int num_encoded_size_from_int(int num);
-void num_encode(int num, uint8_t * dst);
-int num_encoded_size_from_encoded(const uint8_t * src);
-int num_decode(const uint8_t * src);
-#define NUM_MAX_ONE_BYTE 63
+int m4_num_encoded_size_from_int(int num);
+void m4_num_encode(int num, uint8_t * dst);
+int m4_num_encoded_size_from_encoded(const uint8_t * src);
+int m4_num_decode(const uint8_t * src);
+#define M4_NUM_MAX_ONE_BYTE 63
 
-typedef struct {int * data; int max; int len; } stack_t;
-typedef int (*runtime_cb)(void * runtime_ctx_t, stack_t * stack);
-typedef struct {const char * name; runtime_cb cb;} runtime_cb_array_t;
+typedef struct {int * data; int max; int len;} m4_stack_t;
+typedef int (*m4_runtime_cb)(void * param, m4_stack_t * stack);
+typedef struct {m4_runtime_cb cb; void * param;} m4_runtime_cb_pair_t;
+typedef struct {const char * name; m4_runtime_cb_pair_t cb_pair;} m4_runtime_cb_array_t;
 
-typedef struct {
-    const runtime_cb_array_t * runtime_cb_array;
-} runtime_t;
-
-typedef struct {
-    int (*run)(
-        const uint8_t * program_start,
-        const uint8_t * data_start,
-        runtime_cb * runtime_cbs,
-        void * runtime_ctx,
-        int variable_count
-    );
-    int (*call_defined_word)(
-        const uint8_t * defined_word_ptr,
-        stack_t * stack
-    );
-} mcp_forth_engine_t;
-
-extern const mcp_forth_engine_t compact_bytecode_vm_engine;
-
-int mcp_forth_execute(
+int m4_vm_engine_run(
     const uint8_t * bin,
     int bin_len,
-    const runtime_t * runtime,
-    void * runtime_ctx,
-    const mcp_forth_engine_t * engine,
-    const char ** missing_word
+    uint8_t * memory_start,
+    int memory_len,
+    const m4_runtime_cb_array_t ** cb_arrays,
+    const char ** missing_runtime_word_dst
 );
+int m4_x86_32_engine_run(
+    const uint8_t * bin,
+    int bin_len,
+    uint8_t * memory_start,
+    int memory_len,
+    const m4_runtime_cb_array_t ** cb_arrays,
+    const char ** missing_runtime_word_dst
+);
+
+extern const m4_backend_t m4_compact_bytecode_vm_backend;
+extern const m4_backend_t m4_x86_32_backend;
+extern const m4_runtime_cb_array_t m4_runtime_lib_io[];
+extern const m4_runtime_cb_array_t m4_runtime_lib_time[];
+extern const m4_runtime_cb_array_t m4_runtime_lib_string[];
+extern const m4_runtime_cb_array_t m4_runtime_lib_process[];
+extern const m4_runtime_cb_array_t m4_runtime_lib_file[];
+
+int m4_bytes_remaining(void * base, void * p, int len);
+void * m4_align(void * p);
+int m4_unpack_binary_header(
+    const uint8_t * bin,
+    int bin_len,
+    uint8_t * memory_start,
+    int memory_len,
+    const m4_runtime_cb_array_t ** cb_arrays,
+    const char ** missing_runtime_word_dst,
+    int max_callbacks,
+    int *** variables_dst,
+    const m4_runtime_cb_pair_t *** runtime_cbs_dst,
+    const uint8_t ** data_start_dst,
+    uint8_t ** callback_info_dst,
+    const uint8_t *** callback_words_locations_dst,
+    const uint8_t ** program_start_dst,
+    uint8_t ** memory_used_end_dst
+);
+
+int m4_lit(void * param, m4_stack_t * stack);
+int m4_f00(void * param, m4_stack_t * stack);
+int m4_f01(void * param, m4_stack_t * stack);
+int m4_f02(void * param, m4_stack_t * stack);
+int m4_f03(void * param, m4_stack_t * stack);
+int m4_f04(void * param, m4_stack_t * stack);
+int m4_f05(void * param, m4_stack_t * stack);
+int m4_f06(void * param, m4_stack_t * stack);
+int m4_f07(void * param, m4_stack_t * stack);
+int m4_f08(void * param, m4_stack_t * stack);
+int m4_f09(void * param, m4_stack_t * stack);
+int m4_f010(void * param, m4_stack_t * stack);
+int m4_f10(void * param, m4_stack_t * stack);
+int m4_f11(void * param, m4_stack_t * stack);
+int m4_f12(void * param, m4_stack_t * stack);
+int m4_f13(void * param, m4_stack_t * stack);
+int m4_f14(void * param, m4_stack_t * stack);
+int m4_f15(void * param, m4_stack_t * stack);
+int m4_f16(void * param, m4_stack_t * stack);
+int m4_f17(void * param, m4_stack_t * stack);
+int m4_f18(void * param, m4_stack_t * stack);
+int m4_f19(void * param, m4_stack_t * stack);
+int m4_f110(void * param, m4_stack_t * stack);
+int m4_f0x(void * param, m4_stack_t * stack);
+int m4_f1x(void * param, m4_stack_t * stack);

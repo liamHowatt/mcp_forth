@@ -1,131 +1,84 @@
 #include "mcp_forth.h"
 #include <fcntl.h>
 #include <unistd.h>
-#include <termios.h>
-#include <time.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-static int rt_type(void * ctx, stack_t * stack)
-{
-    if(!(stack->len >= 2)) return STACK_UNDERFLOW_ERROR;
-    fwrite((void *)stack->data[-2], 1, stack->data[-1], stdout);
-    fflush(stdout);
-    stack->data -= 2;
-    stack->len -= 2;
-    return 0;
-}
+static_assert(sizeof(int) == sizeof(void *), "expected a 32 bit system");
 
-static int rt_cr(void * ctx, stack_t * stack)
-{
-    puts("");
-    return 0;
-}
-
-static int rt_dot(void * ctx, stack_t * stack)
-{
-    if(!(stack->len >= 1)) return STACK_UNDERFLOW_ERROR;
-    printf("%d ", stack->data[-1]);
-    fflush(stdout);
-    stack->data -= 1;
-    stack->len -= 1;
-    return 0;
-}
-
-static int rt_key(void * ctx, stack_t * stack)
-{
-    if(!(stack->len < stack->max)) return STACK_UNDERFLOW_ERROR;
-    int c = getchar();
-    if(c == EOF) exit(1);
-    *stack->data = c;
-    stack->data += 1;
-    stack->len += 1;
-    return 0;
-}
-
-static int rt_emit(void * ctx, stack_t * stack)
-{
-    if(!(stack->len >= 1)) return STACK_UNDERFLOW_ERROR;
-    putchar(stack->data[-1]);
-    fflush(stdout);
-    stack->data -= 1;
-    stack->len -= 1;
-    return 0;
-}
-
-static int rt_ms(void * ctx, stack_t * stack)
-{
-    if(!(stack->len >= 1)) return STACK_UNDERFLOW_ERROR;
-    stack->data -= 1;
-    stack->len -= 1;
-    unsigned long long ms = *stack->data;
-    unsigned long long sec = ms / 1000ull;
-    unsigned long long ms_no_sec = ms % 1000ull;
-    unsigned long long ns_no_sec = ms_no_sec * 1000000ull;
-    struct timespec tspec = {.tv_sec=sec, .tv_nsec=ns_no_sec};
-    int res = nanosleep(&tspec, NULL);
-    assert(res == 0);
-    return 0;
-}
-
-static const runtime_cb_array_t runtime_cb_array[] = {
-    {"type", rt_type},
-    {"cr", rt_cr},
-    {".", rt_dot},
-    {"key", rt_key},
-    {"emit", rt_emit},
-    {"ms", rt_ms},
-    {NULL, NULL},
-};
-
-static const runtime_t exe_runtime = {
-    .runtime_cb_array=runtime_cb_array
-};
+#define ARRAY_LEN(arr) (sizeof(arr) / sizeof(*(arr)))
 
 int main(int argc, char ** argv)
 {
     assert(argc == 3);
 
-    const mcp_forth_engine_t * engine;
-    if(0 == strcmp("vm", argv[1])) {
-        engine = &compact_bytecode_vm_engine;
-    } else {
-        assert(0);
-    }
-
     int fd;
     int res;
 
+    int (*run_command)(
+        const uint8_t * bin,
+        int bin_len,
+        uint8_t * memory_start,
+        int memory_len,
+        const m4_runtime_cb_array_t ** cb_arrays,
+        const char ** missing_runtime_word_dst
+    );
+    int mmap_prot = PROT_READ;
+
+    if(0 == strcmp("vm", argv[1])) {
+        run_command = m4_vm_engine_run;
+    }
+    else if(0 == strcmp("x86", argv[1])) {
+        run_command = m4_x86_32_engine_run;
+        mmap_prot |= PROT_EXEC;
+    }
+    else {
+        assert(0);
+    }
+
     fd = open(argv[2], O_RDONLY);
     assert(fd != -1);
-    int bin_len = lseek(fd, 0, SEEK_END);
-    assert(bin_len != -1);
-    res = lseek(fd, 0, SEEK_SET);
-    assert(res != -1);
 
-    uint8_t * bin = malloc(bin_len);
-    assert(bin);
+    struct stat statbuf;
+    res = fstat(fd, &statbuf);
+    assert(res == 0);
+    int bin_len = statbuf.st_size;
 
-    res = read(fd, bin, bin_len);
-    assert(res == bin_len);
+    uint8_t * bin = mmap(NULL, bin_len, mmap_prot, MAP_PRIVATE, fd, 0);
+    assert(bin != MAP_FAILED);
 
     res = close(fd);
     assert(res != -1);
 
-    // if(isatty(STDIN_FILENO)) {
-    //     struct termios t;
-    //     res = tcgetattr(STDIN_FILENO, &t); assert(res == 0);
-    //     t.c_lflag &= ~(ICANON | ECHO); /* Disable canonical mode and echo */
-    //     res = tcsetattr(STDIN_FILENO, TCSANOW, &t); assert(res == 0);
-    // }
+    const m4_runtime_cb_array_t * cbs[] = {
+        m4_runtime_lib_io,
+        m4_runtime_lib_time,
+        m4_runtime_lib_string,
+        m4_runtime_lib_process,
+        m4_runtime_lib_file,
+        NULL
+    };
 
+    static uint8_t memory[8 * 1024 * 1024];
     const char * missing_word;
-    res = mcp_forth_execute(bin, bin_len, &exe_runtime, NULL, engine, &missing_word);
-    if(res == RUNTIME_WORD_MISSING_ERROR) {
+    res = run_command(
+        bin,
+        bin_len,
+        memory,
+        sizeof(memory),
+        cbs,
+        &missing_word
+    );
+    if(res == M4_RUNTIME_WORD_MISSING_ERROR) {
         fprintf(stderr, "runtime word \"%s\" missing\n", missing_word);
     }
-    free(bin);
-
     if(res) {
         fprintf(stderr, "engine error %d\n", res);
-        return 1;
     }
+
+    res = munmap(bin, bin_len);
+    assert(res == 0);
 }

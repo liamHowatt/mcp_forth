@@ -10,20 +10,25 @@ include_directories(${CMAKE_CURRENT_LIST_DIR}/../../..) # mcp_forth.h
 add_executable(lvgl_workspace
     main.c
     mouse_cursor_icon.c
-    lvgl_forth_runtime.c
+    runtime_lvgl.c
+    ../../../mcp_forth.c
     ../../../compile.c
     ../../../vm_backend.c
-    ../../../execute.c
     ../../../vm_engine.c
-    ../../../num.c
+    ../../../runtime_io.c
+
+    ../../../x86-32_backend_generated.c
+    ../../../x86-32_backend.c
+    ../../../x86-32_engine_asm.o
+    ../../../x86-32_engine.c
 )
 
 # 32 bit
 set_target_properties(lvgl_workspace PROPERTIES COMPILE_OPTIONS "-m32" LINK_FLAGS "-m32")
 
-set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32 -g -Wall -Wextra -fsanitize=address -Wno-unused-parameter")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32 -g -Wall -Wextra -fsanitize=address -Wno-unused-parameter")
-set (CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS} -m32 -fsanitize=address -Wno-unused-parameter")
+set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32 -g -Wall -Wextra -fsanitize=address -Wno-unused-parameter -Wno-missing-field-initializers")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32 -g -Wall -Wextra -fsanitize=address -Wno-unused-parameter -Wno-missing-field-initializers")
+set (CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS} -m32 -fsanitize=address -Wno-unused-parameter -Wno-missing-field-initializers")
 
 target_link_libraries(lvgl_workspace lvgl)
 target_link_libraries(lvgl_workspace pthread)

@@ -11,8 +11,8 @@ static void do_test(const void * v) {
     const int * v2 = v;
     int x = *v2;
     uint8_t buf[5];
-    num_encode(x, buf);
-    int y = num_decode(buf);
+    m4_num_encode(x, buf);
+    int y = m4_num_decode(buf);
     if(x != y) {
         printf("fail. i=%d,%d u=%u,%u\n", x, y, iu(x), iu(y));
         exit(1);

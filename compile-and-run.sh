@@ -1,8 +1,8 @@
 #!/bin/bash
 
-BASENAME=$(basename $1 .fs)
+BASENAME=$(basename $2 .fs)
 BINNAME="${BASENAME}.bin"
-echo $1
-./compile-exe vm $1 $BINNAME
-./execute-exe vm $BINNAME
+echo $2
+./compile-exe $1 $2 $BINNAME
+./execute-exe $1 $BINNAME
 echo

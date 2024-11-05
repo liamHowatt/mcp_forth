@@ -1,19 +1,17 @@
 #include "lvgl/lvgl.h"
-#include <unistd.h>
-#include <stdio.h>
-#include <assert.h>
-#include <stdlib.h>
 #include "mcp_forth.h"
-#include "lvgl_forth_runtime.h"
+#include <unistd.h>
+#include <sys/mman.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 static_assert(sizeof(int) == sizeof(void *), "expected a 32 bit system");
 
-#define LOOP_WORD "\n__lvgl_timer_loop"
+#define ARRAY_LEN(arr) (sizeof(arr) / sizeof(*(arr)))
 
-typedef struct {
-    uint8_t * binary;
-    int binary_len;
-} main_user_data_t;
+#define USE_BACKEND_X86 0
+
+extern const m4_runtime_cb_array_t runtime_lib_lvgl[];
 
 static char * full_file_name(lv_obj_t * file_explorer)
 {
@@ -42,78 +40,72 @@ static int load_file(char ** contents_out, char * path)
     return pos;
 }
 
-static void run_binary(const uint8_t * binary, int binary_len)
-{
-    int res = lvgl_forth_run_binary(binary, binary_len, &compact_bytecode_vm_engine);
-    if(res) {
-        if(res > 0) {
-            fprintf(stderr, "forth engine error code %d\n", res);
-        }
-        else {
-            fprintf(stderr, "forth LVGL runtime error code %d\n", res);
-        }
-        exit(1);
-    }
-}
-
-static void load_and_run_simple(lv_event_t * e)
-{
-    lv_obj_t * file_explorer = lv_event_get_target(e);
-    char * path = full_file_name(file_explorer);
-    LV_LOG_USER("Running simple Forth program \"%s\"", path);
-    char * source;
-    int source_len = load_file(&source, path);
-    free(path);
-    uint8_t * binary;
-    int error_near;
-    int binary_len = mcp_forth_compile(source, source_len, &binary, &compact_bytecode_vm_backend, &error_near);
-    free(source);
-    if(binary_len < 0) {
-        fprintf(stderr, "forth compile error code %d near %d\n", binary_len, error_near);
-        exit(1);
-    }
-    run_binary(binary, binary_len);
-    free(binary);
-    puts(""); /* print a newline in case the program didn't */
-}
-
-static void load_graphical(lv_event_t * e)
-{
-    lv_obj_t * file_explorer = lv_event_get_target(e);
-    char * path = full_file_name(file_explorer);
-    LV_LOG_USER("Running graphical Forth program \"%s\"", path);
-    char * source;
-    int source_len = load_file(&source, path);
-    free(path);
-    /* compile once to check validity */
-    uint8_t * binary;
-    int error_near;
-    int binary_len = mcp_forth_compile(source, source_len, &binary, &compact_bytecode_vm_backend, &error_near);
-    free(binary);
-    if(binary_len < 0) {
-        fprintf(stderr, "forth compile error code %d near %d\n", binary_len, error_near);
-        exit(1);
-    }
-    /* compile again with added timer loop */
-    int new_source_len = source_len + (sizeof(LOOP_WORD) - 1);
-    source = realloc(source, new_source_len);
-    assert(source);
-    memcpy(source + source_len, LOOP_WORD, sizeof(LOOP_WORD) - 1);
-    binary_len = mcp_forth_compile(source, new_source_len, &binary, &compact_bytecode_vm_backend, &error_near);
-    free(source);
-    assert(binary_len >= 0);
-
-    main_user_data_t * main_data = lv_event_get_user_data(e);
-    main_data->binary = binary;
-    main_data->binary_len = binary_len;
-}
-
 static void file_explorer_event_handler(lv_event_t * e)
 {
     lv_obj_t * file_explorer = lv_event_get_target(e);
     bool simple = 0 == strcmp("A:/simple/", lv_file_explorer_get_current_path(file_explorer));
-    if(simple) load_and_run_simple(e);
-    else load_graphical(e);
+
+    char * path = full_file_name(file_explorer);
+    char * source;
+    int source_len = load_file(&source, path);
+    free(path);
+    uint8_t * binary;
+    int error_near;
+#if USE_BACKEND_X86
+    int binary_len = m4_compile(source, source_len, &binary, &m4_x86_32_backend, &error_near);
+#else
+    int binary_len = m4_compile(source, source_len, &binary, &m4_compact_bytecode_vm_backend, &error_near);
+#endif
+    free(source);
+    if(binary_len < 0) {
+        fprintf(stderr, "forth compile error code %d near %d\n", binary_len, error_near);
+        exit(1);
+    }
+#if USE_BACKEND_X86
+    int prot = PROT_READ | PROT_WRITE | PROT_EXEC;
+#else
+    int prot = PROT_READ | PROT_WRITE;
+#endif
+    uint8_t * mapping = mmap(NULL, binary_len, prot, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    assert(mapping != MAP_FAILED);
+    memcpy(mapping, binary, binary_len);
+    free(binary);
+    const m4_runtime_cb_array_t * cbs[] = {
+        m4_runtime_lib_io,
+        NULL,
+        NULL
+    };
+    if(!simple) {
+        lv_obj_clean(lv_screen_active());
+        cbs[1] = runtime_lib_lvgl;
+    }
+    uint8_t * memory = malloc(4096);
+    const char * missing_word;
+#if USE_BACKEND_X86
+    int res = m4_x86_32_engine_run(
+#else
+    int res = m4_vm_engine_run(
+#endif
+        mapping,
+        binary_len,
+        memory,
+        4096,
+        cbs,
+        &missing_word
+    );
+    if(res) {
+        fprintf(stderr, "forth engine error code %d\n", res);
+        if(res == M4_RUNTIME_WORD_MISSING_ERROR) {
+            fprintf(stderr, "runtime word \"%s\" missing\n", missing_word);
+        }
+        exit(1);
+    }
+    if(simple) {
+        free(memory);
+        res = munmap(mapping, binary_len);
+        assert(res == 0);
+        puts(""); /* print a newline in case the program didn't */
+    }
 }
 
 int main()
@@ -131,18 +123,12 @@ int main()
     lv_image_set_src(cursor_img, &mouse_cursor_icon);
     lv_indev_set_cursor(mouse, cursor_img);
 
-    main_user_data_t data = {.binary=NULL};
     lv_obj_t * file_explorer = lv_file_explorer_create(lv_screen_active());
     lv_file_explorer_open_dir(file_explorer, "A:");
-    lv_obj_add_event_cb(file_explorer, file_explorer_event_handler, LV_EVENT_VALUE_CHANGED, &data);
+    lv_obj_add_event_cb(file_explorer, file_explorer_event_handler, LV_EVENT_VALUE_CHANGED, NULL);
 
-    while(data.binary == NULL) {
+    while(1) {
         uint32_t ms_delay = lv_timer_handler();
         usleep(ms_delay * 1000);
     }
-
-    lv_obj_clean(lv_screen_active());
-    run_binary(data.binary, data.binary_len);
-    free(data.binary);
-    assert(0); /* the program should not have exited */
 }

@@ -1,3 +1,3 @@
 [submodule "forth_programs/lvgl/lvgl"]
 	path = forth_programs/lvgl/lvgl
-	url = https://github.com/lvgl/lvgl.git
+	url = https://github.com/liamHowatt/lvgl.git
