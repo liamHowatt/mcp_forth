@@ -1,3 +1,7 @@
+: pre_mask_value ( hw -- hw )
+	0xffdf and
+;
+
 : compute_value ( hw -- hw )
 	dup 0xffc0 and 2/
 	swap 0x001f and
@@ -20,7 +24,7 @@ variable last_value
 variable repeated
 variable start
 
-: helper
+: send_repeat_codes
 	repeated @ 7 / dup 0<> if 0 do
 		pre_inc2 0xaaab store
 	loop else drop then
@@ -34,26 +38,30 @@ variable start
 	>r
 	dup start !
 	1+
-	swap pre_inc2 w@ compute_value last_value ! swap
-	pre_inc2 last_value @ store
+	swap pre_inc2 w@ pre_mask_value last_value ! swap
+	pre_inc2 last_value @ compute_value store
 	0 repeated !
+	swap
 	r> 1 do
-		swap pre_inc2 w@ compute_value >r swap r>
+		pre_inc2 w@ pre_mask_value
 		dup last_value @ <> if
 			last_value !
+			swap
 
-			helper
+			send_repeat_codes
 
-			pre_inc2 last_value @ store
+			pre_inc2 last_value @ compute_value store
 
 			0 repeated !
+			swap
 		else
 			drop
 			1 repeated +!
 		then
 	loop
+	swap
 
-	helper
+	send_repeat_codes
 
 	swap drop
 	start @ -

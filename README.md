@@ -16,9 +16,9 @@ How to run `life.fs` and the hash_xors
 
 ## Performance Measurements
 
-| Test                             | Gforth  | mcp-forth vm -O3 | mcp-forth x86 -O3 | C equivalent -O3 |
-| -------------------------------- | ------- | ---------------- | ----------------- | ---------------- |
-| SPI pixel data compression       | 12.754s | 1m48.735s        | 12.978s           | 0.432s           |
+| Test                             | Gforth  | mcp-forth vm -O3 | mcp-forth x86 -O3 | C equivalent -O3 (-m32) |
+| -------------------------------- | ------- | ---------------- | ----------------- | ----------------------- |
+| SPI pixel data compression       | 10.263s | 1m24.360s        | 4.622s            | 0.432s (0.975s)         |
 
 See the bemchmarks directory for the test source files.
 
@@ -78,7 +78,7 @@ VM runtime because they have no support for 32 bit programs. An emulator such as
 - Any word that was not found at compile time is a runtime dependency and must be provided by
   the runtime.
 - Gforth's "compile time only words" can be used outside of functions in mcp-forth.
-- `UNLOOP` is not required (and will be a no-op if added in the future)
+- `UNLOOP` is not required and is a no-op
 
 ## Minutia
 

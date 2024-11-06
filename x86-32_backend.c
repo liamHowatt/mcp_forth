@@ -97,10 +97,10 @@ static int fragment_bin_size(const m4_fragment_t * all_fragments, const int * se
             size = fragment->param ? 5 : 2; /*mov eax, (lit)*/ /* xor eax, eax */
             break;
         case M4_OPCODE_EXIT_WORD:
-            size = 2;
+            size = 1 + (all_fragments[fragment->param].param ? 1 : 0);
             break;
         case M4_OPCODE_DEFINED_WORD_LOCATION:
-            size = 3;
+            size = fragment->param ? 3 : 0;
             break;
         case M4_OPCODE_PUSH_DATA_ADDRESS:
             /* add eax, (lit) is 83 c0 xx for small and 05 xx xx xx xx for large */
@@ -230,13 +230,17 @@ static void fragment_bin_dump(const m4_fragment_t * all_fragments, const int * s
             }
             break;
         case M4_OPCODE_EXIT_WORD:
-            *(dst++) = 0xc9; /* leave */
+            if(all_fragments[fragment->param].param) {
+                *(dst++) = 0xc9; /* leave */
+            }
             *(dst++) = 0xc3; /* ret */
             break;
         case M4_OPCODE_DEFINED_WORD_LOCATION:
-            *(dst++) = 0x55; /* push ebp */
-            *(dst++) = 0x89; /* mov ebp, esp */
-            *(dst++) = 0xe5;
+            if(fragment->param) {
+                *(dst++) = 0x55; /* push ebp */
+                *(dst++) = 0x89; /* mov ebp, esp */
+                *(dst++) = 0xe5;
+            }
             break;
         case M4_OPCODE_PUSH_DATA_ADDRESS:
             *(dst++) = 0x8b; /* mov eax, [esi+16] */

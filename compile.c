@@ -434,18 +434,27 @@ int m4_compile(
             defining_word = true;
             nstring_t new_defined_word = {.str=ss.word, .len=ss.word_len};
             grow_array_add(&defined_word_nstrings, &new_defined_word);
-            int fragment = sequence_helper(&all_fragments, &sequence, M4_OPCODE_DEFINED_WORD_LOCATION, -1, defining_word);
+            int fragment = sequence_helper(&all_fragments, &sequence, M4_OPCODE_DEFINED_WORD_LOCATION, 0, defining_word);
             grow_array_add(&defined_word_fragments, &fragment);
         }
         else if(EQUAL_STRING_LITERAL(";", ss.word, ss.word_len, false)) {
             RASSERT(defining_word, UNEXPECTED_SEMICOLON_ERROR);
             RASSERT(0 == grow_array_get_len(control_flow_stack), UNTERMINATED_CONTROL_FLOW_ERROR);
-            sequence_helper(&all_fragments, &sequence, M4_OPCODE_EXIT_WORD, -1, defining_word);
+            int defining_word_fragment_i = defined_word_fragments[grow_array_get_len(defined_word_fragments) - 1];
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_EXIT_WORD, defining_word_fragment_i, defining_word);
             defining_word = false;
         }
         else if(EQUAL_STRING_LITERAL("exit", ss.word, ss.word_len, false)) {
             RASSERT(defining_word, NOT_ALLOWED_OUTSIDE_WORD_ERROR);
-            sequence_helper(&all_fragments, &sequence, M4_OPCODE_EXIT_WORD, -1, defining_word);
+            int defining_word_fragment_i = defined_word_fragments[grow_array_get_len(defined_word_fragments) - 1];
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_EXIT_WORD, defining_word_fragment_i, defining_word);
+            arr_len = grow_array_get_len(control_flow_stack);
+            for(int i=0; i<arr_len; i++) {
+                if(control_flow_stack[i].type == CONTROL_FLOW_TYPE_DO) {
+                    all_fragments[defining_word_fragment_i].param = 1;
+                    break;
+                }
+            }
         }
         else if(EQUAL_STRING_LITERAL("(", ss.word, ss.word_len, false)) {
             if(defining_word && all_fragments[sequence[grow_array_get_len(sequence) - 1]].op == M4_OPCODE_DEFINED_WORD_LOCATION) {
@@ -518,7 +527,7 @@ int m4_compile(
             sequence_helper(&all_fragments, &sequence, M4_OPCODE_DEFINED_WORD, defined_word_fragments[grow_array_get_len(defined_word_fragments) - 1], defining_word);
         }
         else if(EQUAL_STRING_LITERAL("variable", ss.word, ss.word_len, false) || EQUAL_STRING_LITERAL("constant", ss.word, ss.word_len, false)) {
-            bool is_constant = ss.word[0] == 'c';
+            bool is_constant = ss.word[0] == 'c' || ss.word[0] == 'C';
             RASSERT(!defining_word, NOT_ALLOWED_INSIDE_WORD_ERROR);
             RASSERT(next_word(&ss), EARLY_END_OF_SOURCE_ERROR);
             RASSERT(-1 == find_nstring(builtins, ARRAY_LEN(builtins), ss.word, ss.word_len, false), WORD_REDEFINED_ERROR);
@@ -651,6 +660,8 @@ int m4_compile(
                 grow_array_add(&defined_words_that_need_callbacks, &defined_word_i);
             }
             sequence_helper(&all_fragments, &sequence, M4_OPCODE_PUSH_CALLBACK, callback_i, defining_word);
+        }
+        else if(EQUAL_STRING_LITERAL("unloop", ss.word, ss.word_len, false)) {
         }
         else {
             int literal;
