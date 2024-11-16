@@ -17,8 +17,7 @@
 	8 rshift swap c!
 ;
 
-variable codes
-	align here codes !
+align here constant codes
 	0xaaab , 0x80ff , 0x8cff , 0x8ccf , 0x98c9 , 0xaabf , 0xaaaf ,
 variable last_value
 variable repeated
@@ -30,7 +29,7 @@ variable start
 	loop else drop then
 
 	repeated @ 7 mod dup 0<> if
-		>r pre_inc2 r> cells codes @ + @ store
+		>r pre_inc2 r> cells codes + @ store
 	else drop then
 ;
 
@@ -43,7 +42,8 @@ variable start
 	0 repeated !
 	swap
 	r> 1 do
-		pre_inc2 w@ pre_mask_value
+		\ inline this: pre_inc2 w@ pre_mask_value
+			           1+ 1+ dup w@ 0xffdf and
 		dup last_value @ <> if
 			last_value !
 			swap
