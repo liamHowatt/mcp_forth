@@ -81,7 +81,13 @@
 (.structures[].name | ltrimstr("_") |
     "    {\"\(. | ascii_downcase)\", {m4_lit, (void *) sizeof(\(.))}},"),
 
-(.macros[] | select((.name | startswith("LV_")) and .params == null and .initializer != null and (.initializer | test("^\\(?[0-9]"))) |
+(.macros[] | select((.name | startswith("LV_"))
+                    and .params == null
+                    and .initializer != null
+                    and (.initializer | test("^\\(?([0-9]|LV_)"))
+                    and (.initializer | contains("DEFINE") | not)
+                    and (.initializer | contains("DECLARE") | not)
+                   ) |
     "    {\"\(.name | ascii_downcase)\", {m4_lit, (void *) (\(.initializer))}},"),
 
 "    {NULL}",
