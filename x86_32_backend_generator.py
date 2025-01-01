@@ -83,7 +83,9 @@ mov eax, [ebx]
 sub ebx, 4
 
 """), ("swap", (), """
-xchg eax, [ebx]
+mov ecx, [ebx]
+mov [ebx], eax
+mov eax, ecx
 
 """), ("*", (), """
 imul eax, [ebx]
@@ -118,8 +120,10 @@ mov eax, [esp+8]
 dec eax
 
 """), ("rot", (), """
-xchg eax, [ebx]
-xchg eax, [ebx-4]
+mov ecx, [ebx]
+mov [ebx], eax
+mov eax, [ebx-4]
+mov [ebx-4], ecx
 
 """), ("pick", (), """
 neg eax ; maybe flip the stack growth direction?

@@ -7,7 +7,7 @@ redundantly, only outputting once.
 The C code is based on this: https://bitbucket.org/4DPi/gen4-hats/src/236d9c064b06640f6a33be649ddd0aae147e0239/4d-hats.c#lines-781:830
 
 ```sh
-gcc -Wall -O3 c.c -o c
+gcc -Wall -O3 -m32 c.c -o c
 time ./c < ~/Downloads/rgb565data.bin > res_c
 ```
 

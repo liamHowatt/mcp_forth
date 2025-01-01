@@ -16,9 +16,9 @@ How to run `life.fs` and the hash_xors
 
 ## Performance Measurements
 
-| Test                             | Gforth  | mcp-forth vm -O3 | mcp-forth x86 -O3 | C equivalent -O3 (-m32) |
-| -------------------------------- | ------- | ---------------- | ----------------- | ----------------------- |
-| SPI pixel data compression       | 8.817   | 1m9.616s         | 4.198s            | 0.432s (0.975s)         |
+| Test                             | Gforth  | mcp-forth vm -O3 | mcp-forth x86 -O3 | C equivalent -O3 -m32 |
+| -------------------------------- | ------- | ---------------- | ----------------- | --------------------- |
+| SPI pixel data compression       | 8.8s    | 1m9.6s           | 2.2s              | 0.9s                  |
 
 See the bemchmarks directory for the test source files.
 
