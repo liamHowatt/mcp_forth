@@ -18,12 +18,12 @@ call [esi+36]
 mov eax, 42
 
 ; exit word
-leave
+leave  ; sometimes omitted
 ret
 
 ; defined word location
-push ebp
-mov ebp, esp
+push ebp       ; sometimes omitted
+mov ebp, esp   ; |
 
 ; push data address
 ; add ebx, 4
