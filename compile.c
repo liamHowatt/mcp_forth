@@ -110,6 +110,7 @@ static const nstring_t builtins[] = {
     NSTRING_LITERAL("+!"),
     NSTRING_LITERAL("/"),
     NSTRING_LITERAL("cells"),
+    NSTRING_LITERAL("nip"),
 };
 
 static bool next_word(source_scanner_t * ss)

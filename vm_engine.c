@@ -524,6 +524,13 @@ static int run_inner(ctx_t * c) {
                         PUSH(x * 4);
                         break;
                     }
+                    case 57: { /* nip */
+                        int top, next;
+                        POP(&top);
+                        POP(&next);
+                        PUSH(top);
+                        break;
+                    }
                     default:
                         assert(0);
                 }
