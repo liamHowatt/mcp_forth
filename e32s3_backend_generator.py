@@ -1,49 +1,25 @@
-import sys
-from nasm import nasm
-import re
+
 
 """
-eax holds the top stack element
-ebx points to the stack element second from the top.
-    the stack grows upwards.
-edi shall point to a struct of:
-        ...
-        variable 2 address
-        variable 1 address
-     -> variable 0 address
-        runtime word 0 m4_runtime_cb_pair_t ptr
-        runtime word 1 m4_runtime_cb_pair_t ptr
-        runtime word 2 m4_runtime_cb_pair_t ptr
-        ...
-esi shall point to a struct of:
-        m4_stack_t
-            data
-    4       max
-    8       len
-    12  memory
-    16  data
-    20  callback info (uint8_t *)
-    24  callback_word_locations
-    28  a number that when subtracted from ebx and divided
-            by 4 is the stack depth
-    32  edi value
-    36  runtime word function
-    40  callback targets
-    44  memset
-    48  memmove
-    52  compare
-edx holds the data-space pointer
+a0     return address
+a1     stack pointer
+a2     top data stack value
+a3     data stack pointer
+a4     base pointer
+a5     data space pointer
+a6     runtime word function
+a7     context struct
 """
 
 builtins = (
       ("dup", (), """
-add ebx, 4
-mov [ebx], eax
+addi a3, a3, 4
+s32i a2, a3, 0
 
 """), ("-", (), """
-neg eax
-add eax, [ebx]
-sub ebx, 4
+l32i a8, a3, 0
+sub a2, a8, a2
+addi a3, a3, -4
 
 """), (">", (), """
 cmp [ebx], eax
@@ -53,8 +29,9 @@ dec eax
 sub ebx, 4
 
 """), ("+", (), """
-add eax, [ebx]
-sub ebx, 4
+l32i a8, a3, 0
+add a2, a8, a2
+addi a3, a3, -4
 
 """), ("=", (), """
 cmp [ebx], eax
@@ -79,28 +56,29 @@ pop edx
 sub  ebx, 4
 
 """), ("drop", (), """
-mov eax, [ebx]
-sub ebx, 4
+l32i a2, a3, 0
+addi a3, a3, -4
 
 """), ("swap", (), """
-mov ecx, [ebx]
-mov [ebx], eax
-mov eax, ecx
+l32i a8, a3, 0
+s32i a2, a3, 0
+mov a2, a8
 
 """), ("*", (), """
 imul eax, [ebx]
 sub ebx, 4
 
 """), ("allot", (), """
-add edx, eax
-mov eax, [ebx]
-sub ebx, 4
+add a5, a5, a2
+l32i a2, a3, 0
+addi a3, a3, -4
 
 """), ("1+", (), """
-inc eax
+addi a2, a2, 1
 
 """), ("invert", (), """
-not eax
+movi a8, -1
+xor a2, a8, a2
 
 """), ("0=", (), """
 cmp eax, 1   ; from C dissasembly of
@@ -117,7 +95,7 @@ mov [ebx], eax
 mov eax, [esp+8]
 
 """), ("1-", (), """
-dec eax
+addi a2, a2, -1
 
 """), ("rot", (), """
 mov ecx, [ebx]
@@ -126,8 +104,8 @@ mov eax, [ebx-4]
 mov [ebx-4], ecx
 
 """), ("pick", (), """
-neg eax ; maybe flip the stack growth direction?
-mov eax, [ebx+eax*4]
+sub a8, a3, a2
+l32i a2, a8, 0
 
 """), ("xor", (), """
 xor eax, [ebx]
@@ -189,7 +167,7 @@ mov eax, [ebx]
 sub ebx, 4
 
 """), ("c@", (), """
-movzx eax, byte [eax]
+l8ui a2, a2, 0
 
 """), ("0<", (), """
 sar eax, 31
@@ -202,7 +180,7 @@ mov eax, [ebx]
 sub ebx, 4
 
 """), ("@", (), """
-mov eax, [eax]
+l32i a2, a2, 0
 
 """), ("c,", (), """
 mov [edx], al
@@ -211,9 +189,9 @@ mov eax, [ebx]
 sub ebx, 4
 
 """), ("here", ("clobber", ), """
-add ebx, 4
-mov [ebx], eax
-mov eax, edx
+addi a3, a3, 4
+s32i a2, a3, 0
+mov a2, a5
 
 """), ("max", (), """
 mov ecx, [ebx]
@@ -319,7 +297,7 @@ pop eax
 pop dword [ebx]
 
 """), ("2/", (), """
-sar eax, 1
+srai a2, a2, 1
 
 """), ("2dup", (), """
 add ebx, 4
@@ -329,8 +307,8 @@ add ebx, 4
 mov [ebx], ecx
 
 """), ("0<>", (), """
-neg eax      ; from C dissasembly of
-sbb eax, eax ; x != 0 ? -1 : 0
+movi a8, -1
+movnez a2, a8, a2
 
 """), ("0>", (), """
 test eax, eax
@@ -339,7 +317,7 @@ movzx eax, al
 dec eax
 
 """), ("w@", (), """
-movzx eax, word [eax]
+l16ui a2, a2, 0
 
 """), ("w!", (), """
 mov ecx, [ebx]
@@ -365,13 +343,13 @@ pop edx
 sub  ebx, 4
 
 """), ("cells", (), """
-sal eax, 2
+slli a2, a2, 2
 
 """), ("nip", (), """
-sub ebx, 4
+addi a3, a3, -4
 
 """), ("negate", (), """
-neg eax
+neg a2, a2
 
 """)
 )

@@ -13,6 +13,8 @@ int main(int argc, char ** argv)
         backend = &m4_compact_bytecode_vm_backend;
     } else if(0 == strcmp("x86", argv[1])) {
         backend = &m4_x86_32_backend;
+    } else if(0 == strcmp("esp32s3", argv[1])) {
+        backend = &m4_e32s3_backend;
     } else {
         assert(0);
     }

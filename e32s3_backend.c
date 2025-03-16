@@ -157,6 +157,19 @@ static int fragment_bin_size(const m4_fragment_t * all_fragments, const int * se
     if(needs & M4_X86_32_MVBA) size += sizeof(m4_x86_32_mvba);
     if(needs & M4_X86_32_SUB4) size += sizeof(m4_x86_32_sub4);
     if(needs & M4_X86_32_MVAB) size += sizeof(m4_x86_32_mvab);
+    if(sequence_i + 1 < sequence_len) {
+        m4_opcode_t next_fragment_op = all_fragments[sequence[sequence_i + 1]].op;
+        int next_fragment_misalignment = (fragment->position + size) % 4;
+        if(next_fragment_op == M4_OPCODE_DEFINED_WORD_LOCATION) {
+            assert(fragment->op == M4_OPCODE_EXIT_WORD);
+            size = (size + 3) & ~3;
+        }
+        else if (next_fragment_op == M4_OPCODE_BRANCH_LOCATION) {
+            if(next_fragment_misalignment == 2 || next_fragment_misalignment == 3) {
+                size += 2; // nop.n
+            }
+        }
+    }
     return size;
 }
 

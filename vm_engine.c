@@ -531,6 +531,12 @@ static int run_inner(ctx_t * c) {
                         PUSH(top);
                         break;
                     }
+                    case 58: { /* negate */
+                        int x;
+                        POP(&x);
+                        PUSH(-x);
+                        break;
+                    }
                     default:
                         assert(0);
                 }
