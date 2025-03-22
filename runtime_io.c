@@ -29,7 +29,7 @@ static int rt_dot(void * param, m4_stack_t * stack)
 
 static int rt_key(void * param, m4_stack_t * stack)
 {
-    if(!(stack->len < stack->max)) return M4_STACK_UNDERFLOW_ERROR;
+    if(!(stack->len < stack->max)) return M4_STACK_OVERFLOW_ERROR;
     int c = getchar();
     if(c == EOF) c = 4; /* ASCII EOT (end of transmission) */
     *stack->data = c;
