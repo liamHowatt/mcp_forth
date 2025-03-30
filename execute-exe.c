@@ -59,6 +59,7 @@ int main(int argc, char ** argv)
         m4_runtime_lib_string,
         m4_runtime_lib_process,
         m4_runtime_lib_file,
+        m4_runtime_lib_assert,
         NULL
     };
 

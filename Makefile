@@ -9,8 +9,8 @@ compile-exe: mcp_forth.h mcp_forth.c compile.c compile-exe.c vm_backend.c x86-32
 x86-32_engine_asm.o: x86-32_engine_asm.s
 	nasm -felf32 -o x86-32_engine_asm.o x86-32_engine_asm.s
 
-execute-exe: mcp_forth.h mcp_forth.c execute-exe.c runtime_io.c runtime_time.c runtime_string.c runtime_process.c runtime_file.c vm_engine.c x86-32_engine.c x86-32_engine_asm.o
-	gcc -m32 -Wall -fsanitize=address -g mcp_forth.c execute-exe.c runtime_io.c runtime_time.c runtime_string.c runtime_process.c runtime_file.c vm_engine.c x86-32_engine.c x86-32_engine_asm.o -o execute-exe
+execute-exe: mcp_forth.h mcp_forth.c execute-exe.c runtime_io.c runtime_time.c runtime_string.c runtime_process.c runtime_file.c runtime_assert.c vm_engine.c x86-32_engine.c x86-32_engine_asm.o
+	gcc -m32 -Wall -fsanitize=address -g mcp_forth.c execute-exe.c runtime_io.c runtime_time.c runtime_string.c runtime_process.c runtime_file.c runtime_assert.c vm_engine.c x86-32_engine.c x86-32_engine_asm.o -o execute-exe
 
 test-simple: all
 	find forth_programs/simple -maxdepth 1 -type f | xargs -I{} ./compile-and-run.sh vm {}
