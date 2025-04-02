@@ -4,14 +4,13 @@
 #include <sys/mman.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "runtime_lvgl.h"
 
 static_assert(sizeof(int) == sizeof(void *), "expected a 32 bit system");
 
 #define ARRAY_LEN(arr) (sizeof(arr) / sizeof(*(arr)))
 
 #define USE_BACKEND_X86 0
-
-extern const m4_runtime_cb_array_t runtime_lib_lvgl[];
 
 static char * full_file_name(lv_obj_t * file_explorer)
 {

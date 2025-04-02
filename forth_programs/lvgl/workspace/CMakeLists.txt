@@ -5,7 +5,6 @@ project(lvgl_workspace LANGUAGES C CXX)
 include(${CMAKE_CURRENT_LIST_DIR}/../lvgl/CMakeLists.txt)
 include_directories(${CMAKE_CURRENT_LIST_DIR})
 include_directories(${CMAKE_CURRENT_LIST_DIR}/..) # lvgl/lvgl.h
-include_directories(${CMAKE_CURRENT_LIST_DIR}/../../..) # mcp_forth.h
 
 add_executable(lvgl_workspace
     main.c
