@@ -608,12 +608,12 @@ int m4_compile(
         }
         else if(EQUAL_STRING_LITERAL("repeat", ss.word, ss.word_len, false)) {
             arr_len = grow_array_get_len(control_flow_stack);
-            RASSERT(arr_len != 0, UNEXPECTED_CONTROL_FLOW_TERMINATOR_ERROR);
-            assert(arr_len >= 2);
+            RASSERT(arr_len > 0, UNEXPECTED_CONTROL_FLOW_TERMINATOR_ERROR);
             control_flow_t * while_cf = &control_flow_stack[arr_len - 1];
             RASSERT(while_cf->type == CONTROL_FLOW_TYPE_WHILE, WRONG_TERMINATOR_FOR_THIS_CONTROL_FLOW_ERROR);
+            RASSERT(arr_len > 1, UNEXPECTED_CONTROL_FLOW_TERMINATOR_ERROR);
             control_flow_t * begin_cf = &control_flow_stack[arr_len - 2];
-            assert(begin_cf->type == CONTROL_FLOW_TYPE_BEGIN);
+            RASSERT(begin_cf->type == CONTROL_FLOW_TYPE_BEGIN, WRONG_TERMINATOR_FOR_THIS_CONTROL_FLOW_ERROR);
             sequence_helper(&all_fragments, &sequence, M4_OPCODE_BRANCH, begin_cf->fragment, defining_word);
             grow_array_add(&sequence, &while_cf->fragment);
             grow_array_drop_end(control_flow_stack);
