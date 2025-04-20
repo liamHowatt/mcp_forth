@@ -77,6 +77,7 @@ int m4_vm_engine_run(
     const m4_runtime_cb_array_t ** cb_arrays,
     const char ** missing_runtime_word_dst
 );
+void m4_vm_engine_global_cleanup(void);
 int m4_x86_32_engine_run(
     const uint8_t * bin,
     int bin_len,
@@ -105,6 +106,7 @@ int m4_unpack_binary_header(
     const m4_runtime_cb_array_t ** cb_arrays,
     const char ** missing_runtime_word_dst,
     int max_callbacks,
+    int * callback_count_dst,
     int *** variables_dst,
     const m4_runtime_cb_pair_t *** runtime_cbs_dst,
     const uint8_t ** data_start_dst,

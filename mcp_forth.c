@@ -70,6 +70,7 @@ int m4_unpack_binary_header(
     const m4_runtime_cb_array_t ** cb_arrays,
     const char ** missing_runtime_word_dst,
     int max_callbacks,
+    int * callback_count_dst,
     int *** variables_dst,
     const m4_runtime_cb_pair_t *** runtime_cbs_dst,
     const uint8_t ** data_start_dst,
@@ -135,6 +136,7 @@ int m4_unpack_binary_header(
 
     int n_callbacks = m4_num_decode(bin_p);
     bin_p += m4_num_encoded_size_from_encoded(bin_p);
+    *callback_count_dst = n_callbacks;
     if(n_callbacks) {
         if(n_callbacks > max_callbacks) {
             return M4_TOO_MANY_CALLBACKS_ERROR;

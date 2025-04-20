@@ -1,6 +1,10 @@
 #include "mcp_forth.h"
 #include <stdarg.h>
 
+#ifndef M4_NO_TLS
+    #include <stdlib.h> /* malloc, free */
+#endif
+
 #define RASSERT(expr, ecode) do { if(!(expr)) return (ecode); } while(0)
 
 #define POP(var)  do { int ret; if((ret = pop((var), &c->stack))) return ret; } while(0)
@@ -18,6 +22,12 @@
     return ret; \
 }
 
+#ifndef M4_NO_TLS
+    #define GLOBAL() (global_)
+#else
+    #define GLOBAL() (&global_)
+#endif
+
 union iu {int i; unsigned u;};
 
 typedef struct {
@@ -33,12 +43,18 @@ typedef struct {
     uint8_t * callback_info;
     const uint8_t ** callback_word_locations;
     const uint8_t * pc;
+    int callback_array_offset;
 } ctx_t;
 
-#ifdef M4_NO_TLS
-static ctx_t * g_ctx;
+typedef struct {
+    int callbacks_used;
+    ctx_t * ctxs[MAX_CALLBACKS];
+} global_t;
+
+#ifndef M4_NO_TLS
+static __thread global_t * global_;
 #else
-static __thread ctx_t * g_ctx;
+static global_t global_;
 #endif
 
 static int run_inner(ctx_t * c);
@@ -67,7 +83,9 @@ static int push(int src, m4_stack_t * stack) {
 
 static int callback_handle(int cb_i, int arg1, va_list ap)
 {
-    ctx_t * c = g_ctx;
+    ctx_t * c = GLOBAL()->ctxs[cb_i];
+    cb_i -= c->callback_array_offset;
+
     uint8_t cb_info = c->callback_info[cb_i];
     int n_params = cb_info >> 1;
     assert(0 == push(arg1, &c->stack));
@@ -613,7 +631,7 @@ static int run_inner(ctx_t * c) {
                 break;
             }
             case M4_OPCODE_PUSH_CALLBACK:
-                PUSH((int) callback_targets[pc_step(&c->pc)]);
+                PUSH((int) callback_targets[c->callback_array_offset + pc_step(&c->pc)]);
                 break;
             case M4_OPCODE_DECLARE_CONSTANT: {
                 int x;
@@ -635,11 +653,16 @@ int m4_vm_engine_run(
     const m4_runtime_cb_array_t ** cb_arrays,
     const char ** missing_runtime_word_dst
 ) {
+#ifndef M4_NO_TLS
+    int callbacks_used = global_ ? global_->callbacks_used : 0;
+#else
+    int callbacks_used = global_.callbacks_used;
+#endif
+
     uint8_t * memory_p = m4_align(memory_start);
     ctx_t * c = (ctx_t *) memory_p;
     memory_p += sizeof(ctx_t);
     if(m4_bytes_remaining(memory_start, memory_p, memory_len) < 0) return M4_OUT_OF_MEMORY_ERROR;
-    g_ctx = c;
 
     c->stack.data = (int *) memory_p;
     memory_p += 100 * 4;
@@ -657,6 +680,9 @@ int m4_vm_engine_run(
     c->memory_base = memory_start;
     c->memory_len = memory_len;
 
+    c->callback_array_offset = callbacks_used;
+    int callback_count;
+
     int res = m4_unpack_binary_header(
         bin,
         bin_len,
@@ -664,7 +690,8 @@ int m4_vm_engine_run(
         m4_bytes_remaining(memory_start, memory_p, memory_len),
         cb_arrays,
         missing_runtime_word_dst,
-        MAX_CALLBACKS,
+        MAX_CALLBACKS - callbacks_used,
+        &callback_count,
         (int ***) &c->variables_and_constants,
         &c->runtime_cbs,
         &c->data_start,
@@ -675,5 +702,27 @@ int m4_vm_engine_run(
     );
     if(res) return res;
 
+#ifndef M4_NO_TLS
+    if(callback_count && !global_) {
+        global_ = malloc(sizeof(global_t));
+        assert(global_);
+        global_->callbacks_used = 0;
+    }
+#endif
+    global_t * global = GLOBAL();
+    for(int i = 0; i < callback_count; i++) {
+        global->ctxs[global->callbacks_used++] = c;
+    }
+
     return run_inner(c);
+}
+
+void m4_vm_engine_global_cleanup(void)
+{
+#ifndef M4_NO_TLS
+    free(global_);
+    global_ = NULL;
+#else
+    global_.callbacks_used = 0;
+#endif
 }
