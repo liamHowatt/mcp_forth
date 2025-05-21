@@ -32,6 +32,7 @@ esi shall point to a struct of:
     44  memset
     48  memmove
     52  compare
+    56  callback_array_offset
 edx holds the data-space pointer
 """
 

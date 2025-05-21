@@ -21,8 +21,8 @@ dup lv_anim_init
 dup 2 pick lv_anim_set_var
 dup 10 50 lv_anim_set_values
 dup 1000 lv_anim_set_duration
-dup 100 lv_anim_set_playback_delay
-dup 300 lv_anim_set_playback_duration
+dup 100 lv_anim_set_reverse_delay
+dup 300 lv_anim_set_reverse_duration
 dup 500 lv_anim_set_repeat_delay
 dup LV_ANIM_REPEAT_INFINITE lv_anim_set_repeat_count
 dup c' wrapper_lv_anim_path_ease_in_out lv_anim_set_path_cb

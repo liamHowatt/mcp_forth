@@ -147,7 +147,7 @@ static int fragment_bin_size(const m4_fragment_t * all_fragments, const int * se
             break;
         }
         case M4_OPCODE_PUSH_CALLBACK:
-            size = 3 + (asm_num_is_small(fragment->param * 4) ? 3 : 6);
+            size = 6 + (asm_num_is_small(fragment->param * 4) ? 3 : 6);
             break;
         case M4_OPCODE_DECLARE_CONSTANT:
             size = asm_num_is_small(-fragment->param * 4) ? 3 : 6;
@@ -384,6 +384,9 @@ static void fragment_bin_dump(const m4_fragment_t * all_fragments, const int * s
             *(dst++) = 0x8b; /* mov eax, [esi+40] */
             *(dst++) = 0x46;
             *(dst++) = 0x28;
+            *(dst++) = 0x03; /* add eax, [esi+56] */
+            *(dst++) = 0x46;
+            *(dst++) = 0x38;
             *(dst++) = 0x8b; /* mov eax, [eax+...] */
             *(dst++) = asm_num_is_small(offset) ? 0x40 : 0x80;
             ser_i8_or_le32_and_inc(&dst, offset);

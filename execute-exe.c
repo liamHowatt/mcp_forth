@@ -84,4 +84,5 @@ int main(int argc, char ** argv)
     assert(res == 0);
 
     m4_vm_engine_global_cleanup();
+    m4_x86_32_engine_global_cleanup();
 }

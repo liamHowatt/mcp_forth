@@ -84,6 +84,7 @@ add eax, 42
 ; add ebx, 4
 ; mov [ebx], eax
 mov eax, [esi+40]
+add eax, [esi+56]
 mov eax, [eax+42]
 
 ; declare constant

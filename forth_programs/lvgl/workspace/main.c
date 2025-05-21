@@ -103,7 +103,9 @@ static void file_explorer_event_handler(lv_event_t * e)
         free(memory);
         res = munmap(mapping, binary_len);
         assert(res == 0);
-#if !USE_BACKEND_X86
+#if USE_BACKEND_X86
+        m4_x86_32_engine_global_cleanup();
+#else
         m4_vm_engine_global_cleanup();
 #endif
         puts(""); /* print a newline in case the program didn't */
@@ -134,7 +136,9 @@ int main()
         usleep(ms_delay * 1000);
     }
 
-#if !USE_BACKEND_X86
+#if USE_BACKEND_X86
+    m4_x86_32_engine_global_cleanup();
+#else
     m4_vm_engine_global_cleanup();
 #endif
 }

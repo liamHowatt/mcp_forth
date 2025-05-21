@@ -86,6 +86,7 @@ int m4_x86_32_engine_run(
     const m4_runtime_cb_array_t ** cb_arrays,
     const char ** missing_runtime_word_dst
 );
+void m4_x86_32_engine_global_cleanup(void);
 
 extern const m4_backend_t m4_compact_bytecode_vm_backend;
 extern const m4_backend_t m4_x86_32_backend;

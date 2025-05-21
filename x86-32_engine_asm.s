@@ -9,7 +9,7 @@ global m4_x86_32_engine_callback_target_4
 global m4_x86_32_engine_callback_target_5
 global m4_x86_32_engine_callback_target_6
 global m4_x86_32_engine_callback_target_7
-extern m4_x86_32_engine_get_ctx
+extern m4_x86_32_engine_get_global
 
 
 %macro save_state 1
@@ -84,7 +84,9 @@ mov ecx, 7
 
 callback_handler:
 
-call m4_x86_32_engine_get_ctx
+call m4_x86_32_engine_get_global
+mov eax, [eax + 4 + ecx * 4] ; +4 to go to ctx ptr array, +ecx*4 to get our ctx
+sub ecx, [eax + 56]          ; make ecx relative to our ctx's callback_array_offset
 
 push ebx
 push edi
