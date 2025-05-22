@@ -47,10 +47,11 @@ save_state eax
 mov ebx, esp      ; use ebx to store stack pointer misalignment
 and ebx, 15       ; isolate the misalignment
 xor esp, ebx      ; align the stack pointer
+sub esp, 8
 push esi          ; push pointer to stack struct (2nd fn param)
 push dword [ecx+4]; push param                   (1st fn param)
 call [ecx+0]      ; call the function
-add esp, 8
+add esp, 16
 or esp, ebx       ; misalign the stack pointer again
 mov ebx, [esi+0]  ; get the new *data
 sub ebx, 4
@@ -59,32 +60,35 @@ ret
 
 
 m4_x86_32_engine_callback_target_0:
-xor ecx, ecx
+push 0
 jmp callback_handler
 m4_x86_32_engine_callback_target_1:
-mov ecx, 1
+push 1
 jmp callback_handler
 m4_x86_32_engine_callback_target_2:
-mov ecx, 2
+push 2
 jmp callback_handler
 m4_x86_32_engine_callback_target_3:
-mov ecx, 3
+push 3
 jmp callback_handler
 m4_x86_32_engine_callback_target_4:
-mov ecx, 4
+push 4
 jmp callback_handler
 m4_x86_32_engine_callback_target_5:
-mov ecx, 5
+push 5
 jmp callback_handler
 m4_x86_32_engine_callback_target_6:
-mov ecx, 6
+push 6
 jmp callback_handler
 m4_x86_32_engine_callback_target_7:
-mov ecx, 7
+push 7
 
 callback_handler:
 
+sub esp, 8
 call m4_x86_32_engine_get_global
+add esp, 8
+pop ecx
 mov eax, [eax + 4 + ecx * 4] ; +4 to go to ctx ptr array, +ecx*4 to get our ctx
 sub ecx, [eax + 56]          ; make ecx relative to our ctx's callback_array_offset
 
