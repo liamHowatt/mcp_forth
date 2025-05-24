@@ -384,9 +384,9 @@ static void fragment_bin_dump(const m4_fragment_t * all_fragments, const int * s
             *(dst++) = 0x8b; /* mov eax, [esi+40] */
             *(dst++) = 0x46;
             *(dst++) = 0x28;
-            *(dst++) = 0x03; /* add eax, [esi+56] */
+            *(dst++) = 0x03; /* add eax, [esi+44] */
             *(dst++) = 0x46;
-            *(dst++) = 0x38;
+            *(dst++) = 0x2c;
             *(dst++) = 0x8b; /* mov eax, [eax+...] */
             *(dst++) = asm_num_is_small(offset) ? 0x40 : 0x80;
             ser_i8_or_le32_and_inc(&dst, offset);

@@ -36,3 +36,18 @@ dump-x
 
 x 2 + dup 2 + 4 move-wrapper
 dump-x
+
+cr
+
+: print-assert ( actual expect -- )
+    swap
+    dup . cr
+    = assert
+;
+
+s" foobar" s" foobar" compare 0 print-assert
+s" foobar" s" foobaz" compare -1 print-assert
+s" foobar" s" foobaa" compare 1 print-assert
+s" foo"    s" foobaa" compare -1 print-assert
+s" foobar" s" fooba"  compare 1 print-assert
+s" foobar" s" foooo"  compare -1 print-assert

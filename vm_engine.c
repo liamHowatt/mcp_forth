@@ -385,12 +385,10 @@ static int run_inner(ctx_t * c) {
                         PUSH(a > b ? a : b);
                         break;
                     }
-                    case 36: { /* fill */
-                        int addr, len, chr;
-                        POP(&chr);
-                        POP(&len);
-                        POP(&addr);
-                        memset((void *) addr, chr, len);
+                    case 36: { /* 2* */
+                        int x;
+                        POP(&x);
+                        PUSH(x * 2);
                         break;
                     }
                     case 37: { /* 2drop */
@@ -399,12 +397,13 @@ static int run_inner(ctx_t * c) {
                         POP(&x);
                         break;
                     }
-                    case 38: { /* move */
-                        int src, dst, len;
-                        POP(&len);
-                        POP(&dst);
-                        POP(&src);
-                        memmove((void *) dst, (const void *) src, len);
+                    case 38: { /* tuck */
+                        int x1, x2;
+                        POP(&x2);
+                        POP(&x1);
+                        PUSH(x2);
+                        PUSH(x1);
+                        PUSH(x2);
                         break;
                     }
                     case 39: { /* execute */
@@ -432,18 +431,12 @@ static int run_inner(ctx_t * c) {
                         c->memory += 4;
                         break;
                     }
-                    case 42: { /* compare */
-                        int a1, u1, a2, u2;
-                        POP(&u2);
-                        POP(&a2);
-                        POP(&u1);
-                        POP(&a1);
-                        int result = memcmp((void *) a1, (void *) a2, u1 < u2 ? u1 : u2);
-                        if(result == 0) {
-                            PUSH(u1 < u2 ? -1 : u1 > u2 ? 1 : 0);
-                        } else {
-                            PUSH(result < 0 ? -1 : 1);
-                        }
+                    case 42: { /* ?dup */
+                        int x;
+                        POP(&x);
+                        PUSH(x);
+                        if(x)
+                            PUSH(x);
                         break;
                     }
                     case 43: { /* <> */

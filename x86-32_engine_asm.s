@@ -90,7 +90,7 @@ call m4_x86_32_engine_get_global
 add esp, 8
 pop ecx
 mov eax, [eax + 4 + ecx * 4] ; +4 to go to ctx ptr array, +ecx*4 to get our ctx
-sub ecx, [eax + 56]          ; make ecx relative to our ctx's callback_array_offset
+sub ecx, [eax + 44]          ; make ecx relative to our ctx's callback_array_offset
 
 push ebx
 push edi

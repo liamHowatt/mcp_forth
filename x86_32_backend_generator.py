@@ -29,10 +29,7 @@ esi shall point to a struct of:
     32  edi value
     36  runtime word function
     40  callback targets
-    44  memset
-    48  memmove
-    52  compare
-    56  callback_array_offset
+    44  callback_array_offset
 edx holds the data-space pointer
 """
 
@@ -222,40 +219,19 @@ cmp eax, ecx
 cmovl eax, ecx
 sub ebx, 4
 
-"""), ("fill", (), """
-push edx
-mov ecx, esp
-and esp, ~15
-push ecx
-push dword [ebx]
-push eax
-push dword [ebx-4]
-call [esi+44]
-mov esp, [esp+12]
-pop edx
-sub ebx, 8
-mov eax, [ebx]
-sub ebx, 4
+"""), ("2*", (), """
+shl eax, 1
 
 """), ("2drop", (), """
 sub ebx, 4
 mov eax, [ebx]
 sub ebx, 4
 
-"""), ("move", (), """
-push edx
-mov ecx, esp
-and esp, ~15
-push ecx
-push eax
-push dword [ebx-4]
-push dword [ebx]
-call [esi+48]
-mov esp, [esp+12]
-pop edx
-sub ebx, 8
-mov eax, [ebx]
-sub ebx, 4
+"""), ("tuck", (), """
+add ebx, 4
+mov ecx, [ebx-4]
+mov [ebx], ecx
+mov [ebx-4], eax
 
 """), ("execute", (), """
 mov ecx, eax
@@ -273,20 +249,12 @@ add edx, 4
 mov eax, [ebx]
 sub ebx, 4
 
-"""), ("compare", (), """
-push edx
-mov ecx, esp
-and esp, ~15
-push ecx
-push eax
-push dword [ebx]
-push dword [ebx-4]
-push dword [ebx-8]
-call [esi+52]
-mov esp, [esp+16]
-pop edx
-sub ebx, 8
-sub ebx, 4
+"""), ("?dup", (), """
+test eax, eax
+jz .L0
+add ebx, 4
+mov [ebx], eax
+.L0:
 
 """), ("<>", (), """
 cmp [ebx], eax

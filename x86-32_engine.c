@@ -24,9 +24,6 @@ typedef struct {
     void * edi_table;
     void (*call_runtime_word)(void);
     const callback_target_t * callback_targets;
-    void * (*memset)(void *, int, size_t);
-    void * (*memmove)(void *, const void *, size_t);
-    int (*compare)(void * a1, unsigned u1, void * a2, unsigned u2);
     int callback_array_offset;
 } ctx_t;
 
@@ -62,15 +59,6 @@ static const callback_target_t callback_targets[MAX_CALLBACKS] = {
     m4_x86_32_engine_callback_target_6,
     m4_x86_32_engine_callback_target_7,
 };
-
-static int compare(void * a1, unsigned u1, void * a2, unsigned u2)
-{
-    int result = memcmp(a1, a2, u1 < u2 ? u1 : u2);
-    if(result == 0) {
-        return u1 < u2 ? -1 : u1 > u2 ? 1 : 0;
-    }
-    return result < 0 ? -1 : 1;
-}
 
 int m4_x86_32_engine_run(
     const uint8_t * bin,
@@ -127,9 +115,6 @@ int m4_x86_32_engine_run(
     c->edi_table = runtime_cbs - 1;
     c->call_runtime_word = m4_x86_32_engine_call_runtime_word;
     c->callback_targets = callback_targets;
-    c->memset = memset;
-    c->memmove = memmove;
-    c->compare = compare;
 
 #ifndef M4_NO_TLS
     if(callback_count && !global_) {
