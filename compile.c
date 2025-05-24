@@ -384,6 +384,20 @@ int m4_compile(
     while(next_word(&ss)) {
         int word_i;
 
+        /* defined words */
+        word_i = find_nstring(defined_word_nstrings, grow_array_get_len(defined_word_nstrings), ss.word, ss.word_len, false);
+        if(word_i != -1) {
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_DEFINED_WORD, defined_word_fragments[word_i], defining_word);
+            continue;
+        }
+
+        /* variables and constants */
+        word_i = find_nstring(variable_nstrings, grow_array_get_len(variable_nstrings), ss.word, ss.word_len, false);
+        if(word_i != -1) {
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_USE_VARIABLE_OR_CONSTANT, word_i, defining_word);
+            continue;
+        }
+
         /* builtin words */
         word_i = find_nstring(builtins, ARRAY_LEN(builtins), ss.word, ss.word_len, false);
         if(word_i != -1) {
@@ -408,26 +422,11 @@ int m4_compile(
             continue;
         }
 
-        /* defined words */
-        word_i = find_nstring(defined_word_nstrings, grow_array_get_len(defined_word_nstrings), ss.word, ss.word_len, false);
-        if(word_i != -1) {
-            sequence_helper(&all_fragments, &sequence, M4_OPCODE_DEFINED_WORD, defined_word_fragments[word_i], defining_word);
-            continue;
-        }
-
-        /* variables and constants */
-        word_i = find_nstring(variable_nstrings, grow_array_get_len(variable_nstrings), ss.word, ss.word_len, false);
-        if(word_i != -1) {
-            sequence_helper(&all_fragments, &sequence, M4_OPCODE_USE_VARIABLE_OR_CONSTANT, word_i, defining_word);
-            continue;
-        }
-
         /* intrinsic words */
         bool intrinsic_found = true;
         if(EQUAL_STRING_LITERAL(":", ss.word, ss.word_len, false)) {
             RASSERT(!defining_word, NOT_ALLOWED_INSIDE_WORD_ERROR);
             RASSERT(next_word(&ss), EARLY_END_OF_SOURCE_ERROR);
-            RASSERT(-1 == find_nstring(builtins, ARRAY_LEN(builtins), ss.word, ss.word_len, false), WORD_REDEFINED_ERROR);
             RASSERT(-1 == find_nstring(defined_word_nstrings, grow_array_get_len(defined_word_nstrings), ss.word, ss.word_len, false), WORD_REDEFINED_ERROR);
             RASSERT(-1 == find_nstring(runtime_word_nstrings, grow_array_get_len(runtime_word_nstrings), ss.word, ss.word_len, false), WORD_USED_BEFORE_DEFINED_ERROR);
             RASSERT(-1 == find_nstring(variable_nstrings, grow_array_get_len(variable_nstrings), ss.word, ss.word_len, false), VARIABLE_OR_CONSTANT_REDEFINED_ERROR);
@@ -531,7 +530,6 @@ int m4_compile(
             bool is_constant = ss.word[0] == 'c' || ss.word[0] == 'C';
             RASSERT(!defining_word, NOT_ALLOWED_INSIDE_WORD_ERROR);
             RASSERT(next_word(&ss), EARLY_END_OF_SOURCE_ERROR);
-            RASSERT(-1 == find_nstring(builtins, ARRAY_LEN(builtins), ss.word, ss.word_len, false), WORD_REDEFINED_ERROR);
             RASSERT(-1 == find_nstring(defined_word_nstrings, grow_array_get_len(defined_word_nstrings), ss.word, ss.word_len, false), WORD_REDEFINED_ERROR);
             RASSERT(-1 == find_nstring(runtime_word_nstrings, grow_array_get_len(runtime_word_nstrings), ss.word, ss.word_len, false), WORD_USED_BEFORE_DEFINED_ERROR);
             RASSERT(-1 == find_nstring(variable_nstrings, grow_array_get_len(variable_nstrings), ss.word, ss.word_len, false), VARIABLE_OR_CONSTANT_REDEFINED_ERROR);
