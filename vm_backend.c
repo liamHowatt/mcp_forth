@@ -28,6 +28,9 @@ static int fragment_bin_size(const m4_fragment_t * all_fragments, const int * se
         case M4_OPCODE_EXIT_WORD:
         case M4_OPCODE_HALT:
         case M4_OPCODE_DO:
+        case M4_OPCODE_EXECUTE:
+        case M4_OPCODE_THREAD_CREATE:
+        case M4_OPCODE_THREAD_JOIN:
             return m4_num_encoded_size_from_int(fragment->op);
         case M4_OPCODE_DEFINED_WORD_LOCATION:
         case M4_OPCODE_BRANCH_LOCATION:
@@ -70,6 +73,9 @@ static void fragment_bin_dump(const m4_fragment_t * all_fragments, const int * s
         case M4_OPCODE_EXIT_WORD:
         case M4_OPCODE_HALT:
         case M4_OPCODE_DO:
+        case M4_OPCODE_EXECUTE:
+        case M4_OPCODE_THREAD_CREATE:
+        case M4_OPCODE_THREAD_JOIN:
             m4_num_encode(fragment->op, dst);
             break;
         case M4_OPCODE_DEFINED_WORD_LOCATION:

@@ -1,9 +1,16 @@
 #include "mcp_forth.h"
+#include "global.h"
 #include <stdarg.h>
 
-#ifndef M4_NO_TLS
-    #include <stdlib.h> /* malloc, free */
+#ifndef M4_NO_THREAD
+    #include <pthread.h>
+    #include <semaphore.h>
+    #include <alloca.h>
+    _Static_assert(sizeof(pthread_t) == 4);
 #endif
+
+#define STACK_CELL_COUNT 100
+#define RETURN_STACK_CELL_COUNT 100
 
 #define RASSERT(expr, ecode) do { if(!(expr)) return (ecode); } while(0)
 
@@ -12,7 +19,6 @@
 #define RETURN_POP(var)  do { int ret; if((ret = pop((int *) (var), &c->return_stack))) return ret; } while(0)
 #define RETURN_PUSH(var) do { int ret; if((ret = push((int) (var), &c->return_stack))) return ret; } while(0)
 
-#define MAX_CALLBACKS 8
 #define CALLBACK_TARGET_NAME(number) callback_target_ ## number
 #define CALLBACK_TARGET_DEFINE(number) static int CALLBACK_TARGET_NAME(number)(int arg1, ...) { \
     va_list ap; \
@@ -21,12 +27,6 @@
     va_end(ap); \
     return ret; \
 }
-
-#ifndef M4_NO_TLS
-    #define GLOBAL() (global_)
-#else
-    #define GLOBAL() (&global_)
-#endif
 
 union iu {int i; unsigned u;};
 
@@ -44,17 +44,17 @@ typedef struct {
     const uint8_t ** callback_word_locations;
     const uint8_t * pc;
     int callback_array_offset;
+    int total_extra_memory_size;
 } ctx_t;
 
-typedef struct {
-    int callbacks_used;
-    ctx_t * ctxs[MAX_CALLBACKS];
-} global_t;
-
-#ifndef M4_NO_TLS
-static __thread global_t * global_;
-#else
-static global_t global_;
+#ifndef M4_NO_THREAD
+    typedef struct {
+        sem_t done_with_arg_sem;
+        ctx_t * root;
+        int arg;
+        const uint8_t * target;
+        int memory_len;
+    } thread_entry_arg_t;
 #endif
 
 static int run_inner(ctx_t * c);
@@ -83,7 +83,7 @@ static int push(int src, m4_stack_t * stack) {
 
 static int callback_handle(int cb_i, int arg1, va_list ap)
 {
-    ctx_t * c = GLOBAL()->ctxs[cb_i];
+    ctx_t * c = m4_global_get_ctx(cb_i);
     cb_i -= c->callback_array_offset;
 
     uint8_t cb_info = c->callback_info[cb_i];
@@ -124,6 +124,133 @@ static int (*const callback_targets[MAX_CALLBACKS])(int arg1, ...) = {
     CALLBACK_TARGET_NAME(6),
     CALLBACK_TARGET_NAME(7),
 };
+
+#ifndef M4_NO_THREAD
+static void * thread_entry(void * arg_void)
+{
+    int res;
+
+    thread_entry_arg_t * entry_arg = arg_void;
+
+    ctx_t * root = entry_arg->root;
+    int arg = entry_arg->arg;
+    const uint8_t * target = entry_arg->target;
+    int memory_len = entry_arg->memory_len;
+    
+    res = sem_post(&entry_arg->done_with_arg_sem);
+    assert(res == 0);
+
+    uint8_t * memory_start = alloca(memory_len);
+    uint8_t * memory_p = memory_start;
+
+    ctx_t * c = (ctx_t *) memory_p;
+    memory_p += sizeof(ctx_t);
+
+    c->stack.data = (int *) memory_p;
+    memory_p += STACK_CELL_COUNT * 4;
+    c->stack.max = STACK_CELL_COUNT;
+    c->stack.len = 0;
+
+    c->return_stack.data = (int *) memory_p;
+    memory_p += RETURN_STACK_CELL_COUNT * 4;
+    c->return_stack.max = RETURN_STACK_CELL_COUNT;
+    c->return_stack.len = 0;
+    c->return_stack_len_base = 2;
+
+    c->memory_base = memory_start;
+    c->memory_len = memory_len;
+
+    /* inherit these from the root */
+    c->runtime_cbs = root->runtime_cbs;
+    c->data_start = root->data_start;
+    c->variables_and_constants = root->variables_and_constants;
+    c->callback_info = root->callback_info;
+    c->callback_word_locations = root->callback_word_locations;
+    c->callback_array_offset = root->callback_array_offset;
+
+    assert(root->total_extra_memory_size == m4_bytes_remaining(memory_start, memory_p, memory_len));
+    c->total_extra_memory_size = root->total_extra_memory_size;
+    c->memory = memory_p;
+
+    c->pc = target;
+
+    global_thread_t global_thread;
+    m4_global_thread_set(&global_thread, c);
+
+    assert(0 == push(arg, &c->stack));
+
+    assert(0 == push(0, &c->return_stack));
+    assert(0 == push((int) NULL, &c->return_stack));
+
+    res = run_inner(c);
+    assert(res == 0);
+
+    int retval;
+    res = pop(&retval, &c->stack);
+    assert(res == 0);
+
+    return (void *) retval;
+}
+
+static pthread_t thread_create(ctx_t * root, int arg, int prio_change, const uint8_t * target)
+{
+    int res;
+
+    pthread_attr_t attr;
+    res = pthread_attr_init(&attr);
+    assert(res == 0);
+
+    size_t default_stack_size;
+    res = pthread_attr_getstacksize(&attr, &default_stack_size);
+    assert(res == 0);
+    int memory_len = sizeof(ctx_t) + STACK_CELL_COUNT * 4 + RETURN_STACK_CELL_COUNT * 4
+                      + root->total_extra_memory_size;
+    res = pthread_attr_setstacksize(&attr, default_stack_size + memory_len);
+    assert(res == 0);
+
+    res = pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+    assert(res == 0);
+
+    int this_policy;
+    struct sched_param this_sched_param;
+    res = pthread_getschedparam(pthread_self(), &this_policy, &this_sched_param);
+    assert(res == 0);
+
+    this_sched_param.sched_priority += prio_change;
+
+    res = pthread_attr_setschedpolicy(&attr, this_policy);
+    assert(res == 0);
+    res = pthread_attr_setschedparam(&attr, &this_sched_param);
+    assert(res == 0);
+
+    res = pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
+    assert(res == 0);
+
+    thread_entry_arg_t entry_arg;
+    entry_arg.root = root;
+    entry_arg.arg = arg;
+    entry_arg.target = target;
+    entry_arg.memory_len = memory_len;
+
+    res = sem_init(&entry_arg.done_with_arg_sem, 0, 0);
+    assert(res == 0);
+
+    pthread_t thread;
+    res = pthread_create(&thread, &attr, thread_entry, &entry_arg);
+    assert(res == 0);
+
+    res = pthread_attr_destroy(&attr);
+    assert(res == 0);
+
+    /* don't let `entry_arg` go out of scope until the new thread is done with it */
+    res = sem_wait(&entry_arg.done_with_arg_sem);
+    assert(res == 0);
+    res = sem_destroy(&entry_arg.done_with_arg_sem);
+    assert(res == 0);
+
+    return thread;
+}
+#endif
 
 static int run_inner(ctx_t * c) {
     while(1) {
@@ -219,7 +346,7 @@ static int run_inner(ctx_t * c) {
                         c->memory += x;
                         int bytes_remaining = m4_bytes_remaining(c->memory_base, c->memory, c->memory_len);
                         if(bytes_remaining < 0) return M4_OUT_OF_MEMORY_ERROR;
-                        if(bytes_remaining > c->memory_len) return M4_DATA_SPACE_POINTER_OUT_OF_BOUNDS_ERROR;
+                        if(bytes_remaining > c->total_extra_memory_size) return M4_DATA_SPACE_POINTER_OUT_OF_BOUNDS_ERROR;
                         break;
                     }
                     case 11: { /* 1+ */
@@ -406,13 +533,10 @@ static int run_inner(ctx_t * c) {
                         PUSH(x2);
                         break;
                     }
-                    case 39: { /* execute */
-                        RETURN_PUSH(c->return_stack_len_base);
-                        RETURN_PUSH(c->pc);
-                        c->return_stack_len_base = c->return_stack.len;
-                        int fn;
-                        POP(&fn);
-                        c->pc = (const uint8_t *) fn;
+                    case 39: { /* cell+ */
+                        int x;
+                        POP(&x);
+                        PUSH(x + 4);
                         break;
                     }
                     case 40: /* align */
@@ -632,6 +756,39 @@ static int run_inner(ctx_t * c) {
                 c->variables_and_constants[pc_step(&c->pc)].i = x;
                 break;
             }
+            case M4_OPCODE_EXECUTE: {
+                RETURN_PUSH(c->return_stack_len_base);
+                RETURN_PUSH(c->pc);
+                c->return_stack_len_base = c->return_stack.len;
+                int fn;
+                POP(&fn);
+                c->pc = (const uint8_t *) fn;
+                break;
+            }
+#ifndef M4_NO_THREAD
+            case M4_OPCODE_THREAD_CREATE: {
+                int arg, prio_change, target;
+                POP(&target);
+                POP(&prio_change);
+                POP(&arg);
+                int thread_hdl = (int) thread_create(c, arg, prio_change, (const uint8_t *) target);
+                PUSH(thread_hdl);
+                break;
+            }
+            case M4_OPCODE_THREAD_JOIN: {
+                int thread_hdl;
+                POP(&thread_hdl);
+                void * retval;
+                int res = pthread_join((pthread_t) thread_hdl, &retval);
+                assert(res == 0);
+                PUSH((int) retval);
+                break;
+            }
+#else
+            case M4_OPCODE_THREAD_CREATE:
+            case M4_OPCODE_THREAD_JOIN:
+                return M4_THREADS_NOT_ENABLED_ERROR;
+#endif
             default:
                 assert(0);
         }
@@ -646,27 +803,28 @@ int m4_vm_engine_run(
     const m4_runtime_cb_array_t ** cb_arrays,
     const char ** missing_runtime_word_dst
 ) {
-#ifndef M4_NO_TLS
-    int callbacks_used = global_ ? global_->callbacks_used : 0;
-#else
-    int callbacks_used = global_.callbacks_used;
-#endif
+    int res;
+
+    int callbacks_used;
+    res = m4_global_main_get_callbacks_used(&callbacks_used);
+    if(res) return res;
 
     uint8_t * memory_p = m4_align(memory_start);
+
     ctx_t * c = (ctx_t *) memory_p;
     memory_p += sizeof(ctx_t);
     if(m4_bytes_remaining(memory_start, memory_p, memory_len) < 0) return M4_OUT_OF_MEMORY_ERROR;
 
     c->stack.data = (int *) memory_p;
-    memory_p += 100 * 4;
+    memory_p += STACK_CELL_COUNT * 4;
     if(m4_bytes_remaining(memory_start, memory_p, memory_len) < 0) return M4_OUT_OF_MEMORY_ERROR;
-    c->stack.max = 100;
+    c->stack.max = STACK_CELL_COUNT;
     c->stack.len = 0;
 
     c->return_stack.data = (int *) memory_p;
-    memory_p += 100 * 4;
+    memory_p += RETURN_STACK_CELL_COUNT * 4;
     if(m4_bytes_remaining(memory_start, memory_p, memory_len) < 0) return M4_OUT_OF_MEMORY_ERROR;
-    c->return_stack.max = 100;
+    c->return_stack.max = RETURN_STACK_CELL_COUNT;
     c->return_stack.len = 0;
     c->return_stack_len_base = 0;
 
@@ -676,7 +834,7 @@ int m4_vm_engine_run(
     c->callback_array_offset = callbacks_used;
     int callback_count;
 
-    int res = m4_unpack_binary_header(
+    res = m4_unpack_binary_header(
         bin,
         bin_len,
         memory_p,
@@ -695,27 +853,9 @@ int m4_vm_engine_run(
     );
     if(res) return res;
 
-#ifndef M4_NO_TLS
-    if(callback_count && !global_) {
-        global_ = malloc(sizeof(global_t));
-        assert(global_);
-        global_->callbacks_used = 0;
-    }
-#endif
-    global_t * global = GLOBAL();
-    for(int i = 0; i < callback_count; i++) {
-        global->ctxs[global->callbacks_used++] = c;
-    }
+    c->total_extra_memory_size = m4_bytes_remaining(memory_start, c->memory, memory_len);
+
+    m4_global_main_callbacks_set_ctx(callback_count, c);
 
     return run_inner(c);
-}
-
-void m4_vm_engine_global_cleanup(void)
-{
-#ifndef M4_NO_TLS
-    free(global_);
-    global_ = NULL;
-#else
-    global_.callbacks_used = 0;
-#endif
 }

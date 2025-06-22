@@ -9,11 +9,17 @@
 #define M4_RUNTIME_WORD_MISSING_ERROR             1
 #define M4_STACK_UNDERFLOW_ERROR                  2
 #define M4_STACK_OVERFLOW_ERROR                   3
-#define M4_RETURN_STACK_OVERFLOW_ERROR            4
+#ifndef M4_NO_THREAD
+    #define M4_THREADS_CANNOT_LAUNCH_PROGRAMS_ERROR 4
+#else
+    #define M4_THREADS_NOT_ENABLED_ERROR          4
+#endif
 #define M4_OUT_OF_MEMORY_ERROR                    5
 #define M4_TOO_MANY_CALLBACKS_ERROR               6
 #define M4_TOO_MANY_VAR_ARGS_ERROR                7
 #define M4_DATA_SPACE_POINTER_OUT_OF_BOUNDS_ERROR 8
+
+#define M4_ALIGN(x) (((x) + 3) & ~3)
 
 typedef enum {
     M4_OPCODE_BUILTIN_WORD,
@@ -34,6 +40,9 @@ typedef enum {
     M4_OPCODE_PUSH_OFFSET_ADDRESS,
     M4_OPCODE_PUSH_CALLBACK,
     M4_OPCODE_DECLARE_CONSTANT,
+    M4_OPCODE_EXECUTE,
+    M4_OPCODE_THREAD_CREATE,
+    M4_OPCODE_THREAD_JOIN,
     M4_OPCODE_LAST_
 } m4_opcode_t;
 
@@ -77,7 +86,6 @@ int m4_vm_engine_run(
     const m4_runtime_cb_array_t ** cb_arrays,
     const char ** missing_runtime_word_dst
 );
-void m4_vm_engine_global_cleanup(void);
 int m4_x86_32_engine_run(
     const uint8_t * bin,
     int bin_len,
@@ -86,7 +94,8 @@ int m4_x86_32_engine_run(
     const m4_runtime_cb_array_t ** cb_arrays,
     const char ** missing_runtime_word_dst
 );
-void m4_x86_32_engine_global_cleanup(void);
+
+void m4_global_cleanup(void);
 
 extern const m4_backend_t m4_compact_bytecode_vm_backend;
 extern const m4_backend_t m4_x86_32_backend;
@@ -98,7 +107,7 @@ extern const m4_runtime_cb_array_t m4_runtime_lib_file[];
 extern const m4_runtime_cb_array_t m4_runtime_lib_assert[];
 
 int m4_bytes_remaining(void * base, void * p, int len);
-void * m4_align(void * p);
+void * m4_align(const void * p);
 int m4_unpack_binary_header(
     const uint8_t * bin,
     int bin_len,

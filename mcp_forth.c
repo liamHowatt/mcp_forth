@@ -1,4 +1,107 @@
 #include "mcp_forth.h"
+#include "global.h"
+
+#ifndef M4_NO_TLS
+    #include <stdlib.h> /* malloc+free for global */
+#endif
+
+#if defined(M4_NO_TLS) && !defined(M4_NO_THREAD)
+    #error TLS is needed for thread feature
+#endif
+
+#ifndef M4_NO_THREAD
+    __thread global_t * m4_global_;
+#elif !defined(M4_NO_TLS)
+    __thread global_main_t * m4_global_;
+#else
+    global_main_t m4_global_;
+#endif
+
+void * m4_global_get_ctx(int cb_i)
+{
+#ifndef M4_NO_THREAD
+    global_t * global = m4_global_;
+    if(global->is_main) {
+        global_main_t * global_main = (global_main_t *) global;
+        return global_main->ctxs[cb_i];
+    } else {
+        global_thread_t * global_thread = (global_thread_t *) global;
+        return global_thread->ctx;
+    }
+#elif !defined(M4_NO_TLS)
+    return m4_global_->ctxs[cb_i];
+#else
+    return m4_global_.ctxs[cb_i];
+#endif
+}
+
+#ifndef M4_NO_THREAD
+void m4_global_thread_set(global_thread_t * global_thread, void * ctx)
+{
+    m4_global_ = (global_t *) global_thread;
+    global_thread->base.is_main = false;
+    global_thread->ctx = ctx;
+}
+#endif
+
+int m4_global_main_get_callbacks_used(int * callbacks_used_dst)
+{
+#ifndef M4_NO_THREAD
+    if(m4_global_ && !m4_global_->is_main) return M4_THREADS_CANNOT_LAUNCH_PROGRAMS_ERROR;
+    global_main_t * global_main = (global_main_t *) m4_global_;
+    *callbacks_used_dst = global_main ? global_main->callbacks_used : 0;
+#elif !defined(M4_NO_TLS)
+    global_main_t * global_main = m4_global_;
+    *callbacks_used_dst = global_main ? global_main->callbacks_used : 0;
+#else
+    *callbacks_used_dst = m4_global_.callbacks_used;
+#endif
+    return 0;
+}
+
+void m4_global_main_callbacks_set_ctx(int callback_count, void * ctx)
+{
+    global_main_t * global_main;
+
+#ifndef M4_NO_THREAD
+    global_main = (global_main_t *) m4_global_;
+#elif !defined(M4_NO_TLS)
+    global_main = m4_global_;
+#else
+    global_main = &m4_global_;
+#endif
+
+#ifndef M4_NO_TLS
+    if(callback_count && !global_main) {
+        global_main = malloc(sizeof(global_main_t));
+        assert(global_main);
+#ifndef M4_NO_THREAD
+        global_main->base.is_main = true;
+#endif
+        global_main->callbacks_used = 0;
+#ifndef M4_NO_THREAD
+        m4_global_ = (global_t *) global_main;
+#else
+        m4_global_ = global_main;
+#endif
+    }
+#endif
+
+    assert(!callback_count || global_main->callbacks_used + callback_count <= MAX_CALLBACKS);
+    for(int i = 0; i < callback_count; i++) {
+        global_main->ctxs[global_main->callbacks_used++] = ctx;
+    }
+}
+
+void m4_global_cleanup(void)
+{
+#ifndef M4_NO_TLS
+    free(m4_global_);
+    m4_global_ = NULL;
+#else
+    m4_global_.callbacks_used = 0;
+#endif
+}
 
 int m4_num_encoded_size_from_int(int num) {
     uint8_t buf[5];
@@ -54,12 +157,12 @@ int m4_bytes_remaining(void * base, void * p, int len)
     return len - (p - base);
 }
 
-void * m4_align(void * p)
+void * m4_align(const void * p)
 {
-    union {void * v; unsigned u;} vu = {.v=p};
+    union {const void * v; uintptr_t u;} vu = {.v=p};
     vu.u += 3u;
     vu.u &= ~3u;
-    return vu.v;
+    return (void *) vu.v;
 }
 
 int m4_unpack_binary_header(
@@ -85,49 +188,45 @@ int m4_unpack_binary_header(
 
     int n_variables = m4_num_decode(bin_p);
     bin_p += m4_num_encoded_size_from_encoded(bin_p);
-    if(n_variables) {
-        *variables_dst = (int **) memory_p;
-        memory_p += n_variables * 4;
-        if(m4_bytes_remaining(memory_start, memory_p, memory_len) < 0) {
-            return M4_OUT_OF_MEMORY_ERROR;
-        }
+    *variables_dst = (int **) memory_p;
+    memory_p += n_variables * 4;
+    if(m4_bytes_remaining(memory_start, memory_p, memory_len) < 0) {
+        return M4_OUT_OF_MEMORY_ERROR;
     }
 
     int n_runtime_words = m4_num_decode(bin_p);
     bin_p += m4_num_encoded_size_from_encoded(bin_p);
-    if(n_runtime_words) {
-        const char * bin_runtime_word_p = (const char *) bin_p;
-        if(!cb_arrays || !(*cb_arrays)) {
-            if(missing_runtime_word_dst) *missing_runtime_word_dst = bin_runtime_word_p;
-            return M4_RUNTIME_WORD_MISSING_ERROR;
-        }
-        const m4_runtime_cb_pair_t ** runtime_cbs_p = (const m4_runtime_cb_pair_t **) memory_p;
-        if(m4_bytes_remaining(memory_start, runtime_cbs_p, memory_len) < n_runtime_words * 4) {
-            return M4_OUT_OF_MEMORY_ERROR;
-        }
-        *runtime_cbs_dst = runtime_cbs_p;
-        for(int i=0; i<n_runtime_words; i++) {
-            const m4_runtime_cb_array_t ** cb_arrays_p = cb_arrays;
-            const m4_runtime_cb_array_t * array_p = *cb_arrays_p;
-            while(1) {
-                while(!array_p->name) {
-                    array_p = *(++cb_arrays_p);
-                    if(!array_p) {
-                        if(missing_runtime_word_dst) *missing_runtime_word_dst = bin_runtime_word_p;
-                        return M4_RUNTIME_WORD_MISSING_ERROR;
-                    }
-                }
-                if(0 == strcmp(array_p->name, bin_runtime_word_p)) {
-                    *(runtime_cbs_p++) = &array_p->cb_pair;
-                    break;
-                }
-                array_p++;
-            }
-            bin_runtime_word_p += strlen(bin_runtime_word_p) + 1;
-        }
-        memory_p = (uint8_t *) runtime_cbs_p;
-        bin_p = (const uint8_t *) bin_runtime_word_p;
+    const char * bin_runtime_word_p = (const char *) bin_p;
+    if(!cb_arrays || !(*cb_arrays)) {
+        if(missing_runtime_word_dst) *missing_runtime_word_dst = bin_runtime_word_p;
+        return M4_RUNTIME_WORD_MISSING_ERROR;
     }
+    const m4_runtime_cb_pair_t ** runtime_cbs_p = (const m4_runtime_cb_pair_t **) memory_p;
+    if(m4_bytes_remaining(memory_start, runtime_cbs_p, memory_len) < n_runtime_words * 4) {
+        return M4_OUT_OF_MEMORY_ERROR;
+    }
+    *runtime_cbs_dst = runtime_cbs_p;
+    for(int i=0; i<n_runtime_words; i++) {
+        const m4_runtime_cb_array_t ** cb_arrays_p = cb_arrays;
+        const m4_runtime_cb_array_t * array_p = *cb_arrays_p;
+        while(1) {
+            while(!array_p->name) {
+                array_p = *(++cb_arrays_p);
+                if(!array_p) {
+                    if(missing_runtime_word_dst) *missing_runtime_word_dst = bin_runtime_word_p;
+                    return M4_RUNTIME_WORD_MISSING_ERROR;
+                }
+            }
+            if(0 == strcmp(array_p->name, bin_runtime_word_p)) {
+                *(runtime_cbs_p++) = &array_p->cb_pair;
+                break;
+            }
+            array_p++;
+        }
+        bin_runtime_word_p += strlen(bin_runtime_word_p) + 1;
+    }
+    memory_p = (uint8_t *) runtime_cbs_p;
+    bin_p = (const uint8_t *) bin_runtime_word_p;
 
     int bin_data_len = m4_num_decode(bin_p);
     bin_p += m4_num_encoded_size_from_encoded(bin_p);
@@ -137,32 +236,30 @@ int m4_unpack_binary_header(
     int n_callbacks = m4_num_decode(bin_p);
     bin_p += m4_num_encoded_size_from_encoded(bin_p);
     *callback_count_dst = n_callbacks;
-    if(n_callbacks) {
-        if(n_callbacks > max_callbacks) {
-            return M4_TOO_MANY_CALLBACKS_ERROR;
-        }
-        uint8_t * callback_info = memory_p;
-        *callback_info_dst = memory_p;
-        memory_p += n_callbacks;
-        memory_p = m4_align(memory_p);
-        int * callback_word_offsets = (int *) memory_p;
-        memory_p += n_callbacks * 4;
-        if(m4_bytes_remaining(memory_start, memory_p, memory_len) < 0) {
-            return M4_OUT_OF_MEMORY_ERROR;
-        }
-        for(int i=0; i<n_callbacks; i++) {
-            callback_info[i] = *(bin_p++);
-            callback_word_offsets[i] = m4_num_decode(bin_p);
-            bin_p += m4_num_encoded_size_from_encoded(bin_p);
-        }
-        const uint8_t ** callback_word_locations = (const uint8_t **) callback_word_offsets;
-        for(int i=0; i<n_callbacks; i++) {
-            callback_word_locations[i] = bin_p + callback_word_offsets[i];
-        }
-        *callback_words_locations_dst = callback_word_locations;
+    if(n_callbacks > max_callbacks) {
+        return M4_TOO_MANY_CALLBACKS_ERROR;
     }
+    uint8_t * callback_info = memory_p;
+    *callback_info_dst = memory_p;
+    memory_p += n_callbacks;
+    memory_p = m4_align(memory_p);
+    int * callback_word_offsets = (int *) memory_p;
+    memory_p += n_callbacks * 4;
+    if(m4_bytes_remaining(memory_start, memory_p, memory_len) < 0) {
+        return M4_OUT_OF_MEMORY_ERROR;
+    }
+    for(int i=0; i<n_callbacks; i++) {
+        callback_info[i] = *(bin_p++);
+        callback_word_offsets[i] = m4_num_decode(bin_p);
+        bin_p += m4_num_encoded_size_from_encoded(bin_p);
+    }
+    const uint8_t ** callback_word_locations = (const uint8_t **) callback_word_offsets;
+    for(int i=0; i<n_callbacks; i++) {
+        callback_word_locations[i] = bin_p + callback_word_offsets[i];
+    }
+    *callback_words_locations_dst = callback_word_locations;
 
-    *program_start_dst = bin_p;
+    *program_start_dst = m4_align(bin_p);
 
     *memory_used_end_dst = memory_p;
 

@@ -1,4 +1,7 @@
 [BITS 32]
+
+extern m4_global_get_ctx
+
 global m4_x86_32_engine_run_asm
 global m4_x86_32_engine_call_runtime_word
 global m4_x86_32_engine_callback_target_0
@@ -9,7 +12,6 @@ global m4_x86_32_engine_callback_target_4
 global m4_x86_32_engine_callback_target_5
 global m4_x86_32_engine_callback_target_6
 global m4_x86_32_engine_callback_target_7
-extern m4_x86_32_engine_get_global
 
 
 %macro save_state 1
@@ -30,6 +32,7 @@ push esi
 mov esi, [esp+12+4] ; main struct
 mov ebx, [esi+0]    ; stack data
 sub ebx, 4
+mov eax, [ebx]
 mov edi, [esi+32]   ; edi value from struct
 mov edx, [esi+12]   ; data-space pointer
 call [esp+12+8]
@@ -43,6 +46,8 @@ ret
 
 
 m4_x86_32_engine_call_runtime_word:
+add ebx, 4
+mov [ebx], eax
 save_state eax
 mov ebx, esp      ; use ebx to store stack pointer misalignment
 and ebx, 15       ; isolate the misalignment
@@ -54,45 +59,48 @@ call [ecx+0]      ; call the function
 add esp, 16
 or esp, ebx       ; misalign the stack pointer again
 mov ebx, [esi+0]  ; get the new *data
-sub ebx, 4
+sub ebx, 8
 mov edx, [esi+12] ; get new data-space pointer
+mov eax, [ebx+4]
 ret
 
 
 m4_x86_32_engine_callback_target_0:
-push 0
+xor ecx, ecx
 jmp callback_handler
 m4_x86_32_engine_callback_target_1:
-push 1
+mov ecx, 1
 jmp callback_handler
 m4_x86_32_engine_callback_target_2:
-push 2
+mov ecx, 2
 jmp callback_handler
 m4_x86_32_engine_callback_target_3:
-push 3
+mov ecx, 3
 jmp callback_handler
 m4_x86_32_engine_callback_target_4:
-push 4
+mov ecx, 4
 jmp callback_handler
 m4_x86_32_engine_callback_target_5:
-push 5
+mov ecx, 5
 jmp callback_handler
 m4_x86_32_engine_callback_target_6:
-push 6
+mov ecx, 6
 jmp callback_handler
 m4_x86_32_engine_callback_target_7:
-push 7
+mov ecx, 7
 
 callback_handler:
 
-sub esp, 8
-call m4_x86_32_engine_get_global
+push ebx  ; save caller's ebx so we can save our ecx in it for the next call
+
+mov ebx, ecx
+sub esp, 4
+push ecx                     ; pass ecx as param
+call m4_global_get_ctx
 add esp, 8
-pop ecx
-mov eax, [eax + 4 + ecx * 4] ; +4 to go to ctx ptr array, +ecx*4 to get our ctx
+mov ecx, ebx                 ; get the ecx back from ebx
 sub ecx, [eax + 44]          ; make ecx relative to our ctx's callback_array_offset
 
-push ebx
 push edi
 push esi
 

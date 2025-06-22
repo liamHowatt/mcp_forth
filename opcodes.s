@@ -5,12 +5,8 @@
 call 42 ; e8 xx xx xx xx
 
 ; runtime word
-; add ebx, 4
-; mov [ebx], eax
 mov ecx, [edi+(42+1)*4]
 call [esi+36]
-; mov eax, [ebx]
-; sub ebx, 4
 
 ; push literal
 ; add ebx, 4
@@ -91,3 +87,18 @@ mov eax, [eax+42]
 mov [edi+(-42)*4], eax
 ; mov eax, [ebx]
 ; sub ebx, 4
+
+; execute
+mov ecx, eax
+mov eax, [ebx]
+sub ebx, 4
+call ecx
+
+; thread create
+mov ecx, [esi+48]
+call [esi+36]
+
+; thread join
+mov ecx, [esi+48]
+add ecx, 8
+call [esi+36]

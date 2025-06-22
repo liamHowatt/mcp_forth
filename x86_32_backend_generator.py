@@ -30,6 +30,8 @@ esi shall point to a struct of:
     36  runtime word function
     40  callback targets
     44  callback_array_offset
+    48  special_runtime_cbs
+    52  total_extra_memory_size
 edx holds the data-space pointer
 """
 
@@ -233,11 +235,8 @@ mov ecx, [ebx-4]
 mov [ebx], ecx
 mov [ebx-4], eax
 
-"""), ("execute", (), """
-mov ecx, eax
-mov eax, [ebx]
-sub ebx, 4
-call ecx
+"""), ("cell+", (), """
+add eax, 4
 
 """), ("align", (), """
 add edx, 3
@@ -250,11 +249,11 @@ mov eax, [ebx]
 sub ebx, 4
 
 """), ("?dup", (), """
-test eax, eax
-jz .L0
 add ebx, 4
 mov [ebx], eax
-.L0:
+lea ecx, [ebx-4]
+test eax, eax
+cmovz ebx, ecx
 
 """), ("<>", (), """
 cmp [ebx], eax

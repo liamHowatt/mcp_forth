@@ -16,7 +16,7 @@ static int get_flags(const m4_fragment_t * fragment)
         case M4_OPCODE_DEFINED_WORD:
             return 0; /*call (relative lit) ; e8 xx xx xx xx*/
         case M4_OPCODE_RUNTIME_WORD:
-            return M4_X86_32_ADD4 | M4_X86_32_MVBA | M4_X86_32_CLOB | M4_X86_32_SUB4 | M4_X86_32_MVAB;
+            return 0;
         case M4_OPCODE_PUSH_LITERAL:
             return M4_X86_32_ADD4 | M4_X86_32_MVBA | M4_X86_32_CLOB; /*mov eax, (lit)*/
         case M4_OPCODE_EXIT_WORD:
@@ -47,6 +47,11 @@ static int get_flags(const m4_fragment_t * fragment)
             return M4_X86_32_ADD4 | M4_X86_32_MVBA | M4_X86_32_CLOB;
         case M4_OPCODE_DECLARE_CONSTANT:
             return M4_X86_32_SUB4 | M4_X86_32_MVAB;
+        case M4_OPCODE_EXECUTE:
+            return 0;
+        case M4_OPCODE_THREAD_CREATE:
+        case M4_OPCODE_THREAD_JOIN:
+            return 0;
         default:
             assert(0);
     }
@@ -151,6 +156,15 @@ static int fragment_bin_size(const m4_fragment_t * all_fragments, const int * se
             break;
         case M4_OPCODE_DECLARE_CONSTANT:
             size = asm_num_is_small(-fragment->param * 4) ? 3 : 6;
+            break;
+        case M4_OPCODE_EXECUTE:
+            size = 9;
+            break;
+        case M4_OPCODE_THREAD_CREATE:
+            size = 6;
+            break;
+        case M4_OPCODE_THREAD_JOIN:
+            size = 9;
             break;
         default:
             assert(0);
@@ -397,6 +411,33 @@ static void fragment_bin_dump(const m4_fragment_t * all_fragments, const int * s
             *(dst++) = 0x89; /* mov [edi+...], eax */
             *(dst++) = asm_num_is_small(offset) ? 0x47 : 0x87;
             ser_i8_or_le32_and_inc(&dst, offset);
+            break;
+        }
+        case M4_OPCODE_EXECUTE: {
+            static const uint8_t mach_code[] = {
+                0x89, 0xC1,        /* mov ecx, eax    */
+                0x8B, 0x03,        /* mov eax, [ebx]  */
+                0x83, 0xEB, 0x04,  /* sub ebx, 4      */
+                0xFF, 0xD1,        /* call ecx        */
+            };
+            cpy_and_inc(&dst, mach_code, sizeof(mach_code));
+            break;
+        }
+        case M4_OPCODE_THREAD_CREATE: {
+            static const uint8_t mach_code[] = {
+                0x8b, 0x4e, 0x30,  /* mov ecx, [esi+48]  */
+                0xff, 0x56, 0x24,  /* call [esi+36]      */
+            };
+            cpy_and_inc(&dst, mach_code, sizeof(mach_code));
+            break;
+        }
+        case M4_OPCODE_THREAD_JOIN: {
+            static const uint8_t mach_code[] = {
+                0x8b, 0x4e, 0x30,  /* mov ecx, [esi+48]  */
+                0x83, 0xc1, 0x08,  /* add ecx, 8         */
+                0xff, 0x56, 0x24,  /* call [esi+36]      */
+            };
+            cpy_and_inc(&dst, mach_code, sizeof(mach_code));
             break;
         }
         default:

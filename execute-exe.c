@@ -83,6 +83,5 @@ int main(int argc, char ** argv)
     res = munmap(bin, bin_len);
     assert(res == 0);
 
-    m4_vm_engine_global_cleanup();
-    m4_x86_32_engine_global_cleanup();
+    m4_global_cleanup();
 }

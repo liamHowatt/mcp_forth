@@ -92,7 +92,7 @@ static const nstring_t builtins[] = {
     NSTRING_LITERAL("2*"),
     NSTRING_LITERAL("2drop"),
     NSTRING_LITERAL("tuck"),
-    NSTRING_LITERAL("execute"),
+    NSTRING_LITERAL("cell+"),
     NSTRING_LITERAL("align"),
     NSTRING_LITERAL(","),
     NSTRING_LITERAL("?dup"),
@@ -662,6 +662,15 @@ int m4_compile(
         }
         else if(EQUAL_STRING_LITERAL("unloop", ss.word, ss.word_len, false)) {
         }
+        else if(EQUAL_STRING_LITERAL("execute", ss.word, ss.word_len, false)) {
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_EXECUTE, 0, defining_word);
+        }
+        else if(EQUAL_STRING_LITERAL("thread-create", ss.word, ss.word_len, false)) {
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_THREAD_CREATE, 0, defining_word);
+        }
+        else if(EQUAL_STRING_LITERAL("thread-join", ss.word, ss.word_len, false)) {
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_THREAD_JOIN, 0, defining_word);
+        }
         else {
             int literal;
             if(parse_literal(&literal, ss.word, ss.word_len)) {
@@ -744,6 +753,7 @@ int m4_compile(
     }
     bin_len += callback_info_len;
 
+    bin_len = M4_ALIGN(bin_len);
     arr_len = grow_array_get_len(sequence);
     for(int i=0; i<arr_len; i++) {
         bin_len += backend->fragment_bin_size(all_fragments, sequence, arr_len, i);
@@ -751,6 +761,7 @@ int m4_compile(
 
     uint8_t * bin = malloc(bin_len);
     assert(bin);
+    assert(!((uintptr_t)bin % 4));
     uint8_t * bin_p = bin;
 
     arr_len = grow_array_get_len(variable_nstrings);
@@ -794,6 +805,7 @@ int m4_compile(
         bin_p += m4_num_encoded_size_from_encoded(bin_p);
     }
 
+    while((uintptr_t)bin_p % 4) *(bin_p++) = 0;
     arr_len = grow_array_get_len(sequence);
     for(int i=0; i<arr_len; i++) {
         backend->fragment_bin_dump(all_fragments, sequence, arr_len, i, bin_p);
