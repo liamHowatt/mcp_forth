@@ -253,13 +253,16 @@ int m4_unpack_binary_header(
         callback_word_offsets[i] = m4_num_decode(bin_p);
         bin_p += m4_num_encoded_size_from_encoded(bin_p);
     }
+
+    bin_p = m4_align(bin_p);
+
     const uint8_t ** callback_word_locations = (const uint8_t **) callback_word_offsets;
     for(int i=0; i<n_callbacks; i++) {
         callback_word_locations[i] = bin_p + callback_word_offsets[i];
     }
     *callback_words_locations_dst = callback_word_locations;
 
-    *program_start_dst = m4_align(bin_p);
+    *program_start_dst = bin_p;
 
     *memory_used_end_dst = memory_p;
 

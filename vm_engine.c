@@ -7,6 +7,9 @@
     #include <semaphore.h>
     #include <alloca.h>
     _Static_assert(sizeof(pthread_t) == 4);
+    #ifdef __NuttX__
+        #include <sched.h> /* struct sched_param */
+    #endif
 #endif
 
 #define STACK_CELL_COUNT 100
