@@ -338,6 +338,22 @@ sal eax, 2
 """), ("nip", (), """
 sub ebx, 4
 
+"""), ("min", (), """
+mov ecx, [ebx]
+cmp ecx, eax
+cmovl eax, ecx
+sub ebx, 4
+
+"""), ("abs", (), """
+mov ecx, eax
+neg ecx
+cmovns eax, ecx
+
+"""), ("r@", ("clobber", ), """
+add ebx, 4
+mov [ebx], eax
+mov eax, [esp]
+
 """)
 )
 

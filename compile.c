@@ -111,6 +111,9 @@ static const nstring_t builtins[] = {
     NSTRING_LITERAL("/"),
     NSTRING_LITERAL("cells"),
     NSTRING_LITERAL("nip"),
+    NSTRING_LITERAL("min"),
+    NSTRING_LITERAL("abs"),
+    NSTRING_LITERAL("r@"),
 };
 
 static bool next_word(source_scanner_t * ss)

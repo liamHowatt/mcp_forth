@@ -669,6 +669,26 @@ static int run_inner(ctx_t * c) {
                         PUSH(top);
                         break;
                     }
+                    case 58: { /* min */
+                        int a, b;
+                        POP(&b);
+                        POP(&a);
+                        PUSH(a < b ? a : b);
+                        break;
+                    }
+                    case 59: { /* abs */
+                        int a;
+                        POP(&a);
+                        PUSH(a >= 0 ? a : -a);
+                        break;
+                    }
+                    case 60: { /* r@ */
+                        int a;
+                        RETURN_POP(&a);
+                        RETURN_PUSH(a);
+                        PUSH(a);
+                        break;
+                    }
                     default:
                         assert(0);
                 }

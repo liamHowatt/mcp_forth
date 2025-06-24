@@ -105,6 +105,9 @@ extern const m4_runtime_cb_array_t m4_runtime_lib_string[];
 extern const m4_runtime_cb_array_t m4_runtime_lib_process[];
 extern const m4_runtime_cb_array_t m4_runtime_lib_file[];
 extern const m4_runtime_cb_array_t m4_runtime_lib_assert[];
+#ifndef M4_NO_THREAD
+    extern const m4_runtime_cb_array_t m4_runtime_lib_threadutil[];
+#endif
 
 int m4_bytes_remaining(void * base, void * p, int len);
 void * m4_align(const void * p);
