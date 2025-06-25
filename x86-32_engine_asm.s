@@ -1,6 +1,7 @@
 [BITS 32]
 
 extern m4_global_get_ctx
+extern m4_lit
 
 global m4_x86_32_engine_run_asm
 global m4_x86_32_engine_call_runtime_word
@@ -48,6 +49,11 @@ ret
 m4_x86_32_engine_call_runtime_word:
 add ebx, 4
 mov [ebx], eax
+cmp dword [ecx+0], m4_lit
+jne .L0
+mov eax, [ecx+4]
+ret
+.L0:
 save_state eax
 mov ebx, esp      ; use ebx to store stack pointer misalignment
 and ebx, 15       ; isolate the misalignment

@@ -704,8 +704,12 @@ static int run_inner(ctx_t * c) {
             case M4_OPCODE_RUNTIME_WORD: {
                 int runtime_word_i = pc_step(&c->pc);
                 const m4_runtime_cb_pair_t * cb_pair = c->runtime_cbs[runtime_word_i];
-                int ret = cb_pair->cb(cb_pair->param, &c->stack);
-                if(ret) return ret;
+                if(cb_pair->cb == m4_lit) {
+                    PUSH((int) cb_pair->param);
+                } else {
+                    int ret = cb_pair->cb(cb_pair->param, &c->stack);
+                    if(ret) return ret;
+                }
                 break;
             }
             case M4_OPCODE_PUSH_LITERAL:
