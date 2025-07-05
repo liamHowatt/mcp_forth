@@ -9,10 +9,14 @@ int main(int argc, char ** argv)
     assert(argc == 4);
 
     const m4_backend_t * backend;
+    bool make_elf = false;
+    m4_arch_t arch;
     if(0 == strcmp("vm", argv[1])) {
         backend = &m4_compact_bytecode_vm_backend;
     } else if(0 == strcmp("x86", argv[1])) {
         backend = &m4_x86_32_backend;
+        make_elf = true;
+        arch = M4_ARCH_X86_32;
     } else {
         assert(0);
     }
@@ -45,8 +49,22 @@ int main(int argc, char ** argv)
         return 1;
     }
 
+    int elf_len;
+    void * elf;
+    if(make_elf) {
+        elf_len = m4_elf_linux_size();
+        elf = malloc(elf_len);
+        assert(elf);
+        m4_elf_linux(elf, arch, bin_len);
+    }
+
     fd = open(argv[3], O_WRONLY | O_CREAT | O_TRUNC, 0664);
     assert(fd != -1);
+    if(make_elf) {
+        res = write(fd, elf, elf_len);
+        assert(res == elf_len);
+        free(elf);
+    }
     res = write(fd, bin, bin_len);
     assert(res == bin_len);
     free(bin);

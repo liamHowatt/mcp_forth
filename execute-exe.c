@@ -3,7 +3,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/mman.h>
+#include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -15,43 +15,53 @@ int main(int argc, char ** argv)
 {
     assert(argc == 3);
 
-    int fd;
+    ssize_t rwres;
     int res;
 
-    int (*run_command)(
-        const uint8_t * bin,
-        int bin_len,
-        uint8_t * memory_start,
-        int memory_len,
-        const m4_runtime_cb_array_t ** cb_arrays,
-        const char ** missing_runtime_word_dst
-    );
-    int mmap_prot = PROT_READ;
+    m4_engine_run_t run_command;
 
+    int bin_len;
+    void * bin;
+    void * dl_handle;
     if(0 == strcmp("vm", argv[1])) {
         run_command = m4_vm_engine_run;
+
+        int fd = open(argv[2], O_RDONLY);
+        assert(fd != -1);
+
+        struct stat statbuf;
+        res = fstat(fd, &statbuf);
+        assert(res == 0);
+        bin_len = statbuf.st_size;
+
+        bin = malloc(bin_len);
+        assert(bin);
+        rwres = read(fd, bin, bin_len);
+        assert(rwres == bin_len);
+
+        res = close(fd);
+        assert(res != -1);
     }
     else if(0 == strcmp("x86", argv[1])) {
         run_command = m4_x86_32_engine_run;
-        mmap_prot |= PROT_EXEC;
+
+        char * abs_path = realpath(argv[2], NULL);
+        assert(abs_path);
+
+        dl_handle = dlopen(abs_path, RTLD_NOW | RTLD_LOCAL);
+        assert(dl_handle);
+
+        free(abs_path);
+
+        m4_elf_content_t * cont = dlsym(dl_handle, "cont");
+        assert(cont);
+
+        bin_len = cont->bin_len;
+        bin = cont->bin;
     }
     else {
         assert(0);
     }
-
-    fd = open(argv[2], O_RDONLY);
-    assert(fd != -1);
-
-    struct stat statbuf;
-    res = fstat(fd, &statbuf);
-    assert(res == 0);
-    int bin_len = statbuf.st_size;
-
-    uint8_t * bin = mmap(NULL, bin_len, mmap_prot, MAP_PRIVATE, fd, 0);
-    assert(bin != MAP_FAILED);
-
-    res = close(fd);
-    assert(res != -1);
 
     const m4_runtime_cb_array_t * cbs[] = {
         m4_runtime_lib_io,
@@ -80,8 +90,13 @@ int main(int argc, char ** argv)
         fprintf(stderr, "engine error %d\n", res);
     }
 
-    res = munmap(bin, bin_len);
-    assert(res == 0);
+    if(run_command == m4_vm_engine_run) {
+        free(bin);
+    }
+    else {
+        res = dlclose(dl_handle);
+        assert(res == 0);
+    }
 
     m4_global_cleanup();
 }
