@@ -5,6 +5,14 @@
     #include <stdlib.h> /* malloc+free for global */
 #endif
 
+#ifndef M4_NO_THREAD
+    #include <pthread.h>
+    _Static_assert(sizeof(pthread_t) == 4);
+    #ifdef __NuttX__
+        #include <sched.h> /* struct sched_param */
+    #endif
+#endif
+
 #if defined(M4_NO_TLS) && !defined(M4_NO_THREAD)
     #error TLS is needed for thread feature
 #endif
@@ -103,16 +111,102 @@ void m4_global_cleanup(void)
 #endif
 }
 
+#ifndef M4_NO_THREAD
+int m4_engine_thread_create(void * param, m4_stack_t * stack)
+{
+    int res;
+
+    assert(stack->len >= 3);
+
+    const m4_engine_thread_create_param_t * engine_thread_create_param = param;
+    int arg = stack->data[-3];
+    int prio_change = stack->data[-2];
+    const uint8_t * target = (const uint8_t *) stack->data[-1];
+
+    pthread_attr_t attr;
+    res = pthread_attr_init(&attr);
+    assert(res == 0);
+
+    size_t default_stack_size;
+    res = pthread_attr_getstacksize(&attr, &default_stack_size);
+    assert(res == 0);
+    int extra_stack_space = engine_thread_create_param->extra_stack_space_get_cb(stack);
+    res = pthread_attr_setstacksize(&attr, default_stack_size + extra_stack_space);
+    assert(res == 0);
+
+    res = pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+    assert(res == 0);
+
+    int this_policy;
+    struct sched_param this_sched_param;
+    res = pthread_getschedparam(pthread_self(), &this_policy, &this_sched_param);
+    assert(res == 0);
+
+    this_sched_param.sched_priority += prio_change;
+
+    res = pthread_attr_setschedpolicy(&attr, this_policy);
+    assert(res == 0);
+    res = pthread_attr_setschedparam(&attr, &this_sched_param);
+    assert(res == 0);
+
+    res = pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
+    assert(res == 0);
+
+    m4_engine_thread_entry_arg_t entry_arg;
+    entry_arg.stack = stack;
+    entry_arg.arg = arg;
+    entry_arg.target = target;
+
+    res = sem_init(&entry_arg.done_with_arg_sem, 0, 0);
+    assert(res == 0);
+
+    pthread_t thread;
+    res = pthread_create(&thread, &attr, engine_thread_create_param->thread_entry, &entry_arg);
+    assert(res == 0);
+
+    res = pthread_attr_destroy(&attr);
+    assert(res == 0);
+
+    stack->data[-3] = (int) thread;
+    stack->data -= 2;
+    stack->len -= 2;
+
+    /* don't let `entry_arg` go out of scope until the new thread is done with it */
+    res = sem_wait(&entry_arg.done_with_arg_sem);
+    assert(res == 0);
+    res = sem_destroy(&entry_arg.done_with_arg_sem);
+    assert(res == 0);
+
+    return 0;
+}
+#endif /*ndef M4_NO_THREAD*/
+
 int m4_num_encoded_size_from_int(int num) {
-    uint8_t buf[5];
-    m4_num_encode(num, buf);
-    return m4_num_encoded_size_from_encoded(buf);
+    unsigned u = num;
+
+    if(num < 0) u = ~u;
+
+    int size = 0;
+
+    while(u & ~0x3fu) {
+        u >>= 7u;
+        size++;
+    }
+
+    return size + 1;
 }
 
-void m4_num_encode(int num, uint8_t * dst) {
-    union {int i; unsigned u;} iu;
-    iu.i = num;
-    unsigned u = iu.u;
+int m4_num_encode(int num, uint8_t * dst) {
+    int size = m4_num_encoded_size_from_int(num);
+    m4_num_encode_with_size(num, dst, size);
+    return size;
+}
+
+void m4_num_encode_with_size(int num, uint8_t * dst, int size)
+{
+    assert(size >= 1 && size <= 5);
+
+    unsigned u = num;
 
     bool negative = num < 0;
 
@@ -121,6 +215,11 @@ void m4_num_encode(int num, uint8_t * dst) {
     while(u & ~0x3fu) { /* while there are bits set above the 6th */
         *(dst++) = (u & 0x7fu) | 0x80u; /* mask lower 7 bits and set the 8th bit */
         u >>= 7u;
+        size--;
+    }
+    while(size-- > 1) {
+        *(dst++) = u | 0x80u;
+        u = 0;
     }
 
     if(negative) u |= 0x40u; /* set the sign bit (7th bit) */
@@ -134,8 +233,11 @@ int m4_num_encoded_size_from_encoded(const uint8_t * src) {
     return p - src;
 }
 
-int m4_num_decode(const uint8_t * src) {
+int m4_num_decode(const uint8_t * src, const uint8_t ** new_src) {
     int len = m4_num_encoded_size_from_encoded(src);
+
+    if(new_src) *new_src = src + len;
+
     unsigned b = src[len - 1];
     bool negative = b & 0x40u;
     unsigned u = b & 0x3fu;
@@ -147,9 +249,7 @@ int m4_num_decode(const uint8_t * src) {
 
     if(negative) u = ~u;
 
-    union {int i; unsigned u;} iu;
-    iu.u = u;
-    return iu.i;
+    return u;
 }
 
 int m4_bytes_remaining(void * base, void * p, int len)
@@ -167,7 +267,6 @@ void * m4_align(const void * p)
 
 int m4_unpack_binary_header(
     const uint8_t * bin,
-    int bin_len,
     uint8_t * memory_start,
     int memory_len,
     const m4_runtime_cb_array_t ** cb_arrays,
@@ -179,6 +278,7 @@ int m4_unpack_binary_header(
     const uint8_t ** data_start_dst,
     uint8_t ** callback_info_dst,
     const uint8_t *** callback_words_locations_dst,
+    const int ** literals_dst,
     const uint8_t ** program_start_dst,
     uint8_t ** memory_used_end_dst
 )
@@ -186,18 +286,16 @@ int m4_unpack_binary_header(
     const uint8_t * bin_p = bin;
     uint8_t * memory_p = m4_align(memory_start);
 
-    int n_variables = m4_num_decode(bin_p);
-    bin_p += m4_num_encoded_size_from_encoded(bin_p);
+    int n_variables = m4_num_decode(bin_p, &bin_p);
     *variables_dst = (int **) memory_p;
     memory_p += n_variables * 4;
     if(m4_bytes_remaining(memory_start, memory_p, memory_len) < 0) {
         return M4_OUT_OF_MEMORY_ERROR;
     }
 
-    int n_runtime_words = m4_num_decode(bin_p);
-    bin_p += m4_num_encoded_size_from_encoded(bin_p);
+    int n_runtime_words = m4_num_decode(bin_p, &bin_p);
     const char * bin_runtime_word_p = (const char *) bin_p;
-    if(!cb_arrays || !(*cb_arrays)) {
+    if(n_runtime_words && (!cb_arrays || !(*cb_arrays))) {
         if(missing_runtime_word_dst) *missing_runtime_word_dst = bin_runtime_word_p;
         return M4_RUNTIME_WORD_MISSING_ERROR;
     }
@@ -228,13 +326,11 @@ int m4_unpack_binary_header(
     memory_p = (uint8_t *) runtime_cbs_p;
     bin_p = (const uint8_t *) bin_runtime_word_p;
 
-    int bin_data_len = m4_num_decode(bin_p);
-    bin_p += m4_num_encoded_size_from_encoded(bin_p);
+    int bin_data_len = m4_num_decode(bin_p, &bin_p);
     *data_start_dst = bin_p;
     bin_p += bin_data_len;
 
-    int n_callbacks = m4_num_decode(bin_p);
-    bin_p += m4_num_encoded_size_from_encoded(bin_p);
+    int n_callbacks = m4_num_decode(bin_p, &bin_p);
     *callback_count_dst = n_callbacks;
     if(n_callbacks > max_callbacks) {
         return M4_TOO_MANY_CALLBACKS_ERROR;
@@ -250,11 +346,15 @@ int m4_unpack_binary_header(
     }
     for(int i=0; i<n_callbacks; i++) {
         callback_info[i] = *(bin_p++);
-        callback_word_offsets[i] = m4_num_decode(bin_p);
-        bin_p += m4_num_encoded_size_from_encoded(bin_p);
+        callback_word_offsets[i] = m4_num_decode(bin_p, &bin_p);
     }
 
+    int literal_count = m4_num_decode(bin_p, &bin_p);
+
     bin_p = m4_align(bin_p);
+
+    if(literals_dst) *literals_dst = (int *) bin_p;
+    bin_p += 4 * literal_count;
 
     const uint8_t ** callback_word_locations = (const uint8_t **) callback_word_offsets;
     for(int i=0; i<n_callbacks; i++) {
@@ -267,6 +367,34 @@ int m4_unpack_binary_header(
     *memory_used_end_dst = memory_p;
 
     return 0;
+}
+
+int m4_backend_fragment_get_needed_chores(const m4_fragment_t * all_fragments, const int * sequence,
+                                          int sequence_len, int sequence_i, m4_backend_get_flags_t get_flags)
+{
+    const m4_fragment_t * fragment = &all_fragments[sequence[sequence_i]];
+    int needs = get_flags(fragment);
+    if(sequence_i > 0) {
+        const m4_fragment_t * frag_up = &all_fragments[sequence[sequence_i - 1]];
+        int frag_up_flags = get_flags(frag_up);
+        if(frag_up_flags & M4_BACKEND_FLAG_Z) {
+            needs &= ~M4_BACKEND_FLAG_A;
+            if(frag_up_flags & M4_BACKEND_FLAG_Y) {
+                needs &= ~M4_BACKEND_FLAG_B;
+            }
+        }
+    }
+    if(sequence_i + 1 < sequence_len) {
+        const m4_fragment_t * frag_down = &all_fragments[sequence[sequence_i + 1]];
+        int frag_down_flags = get_flags(frag_down);
+        if(frag_down_flags & M4_BACKEND_FLAG_A) {
+            needs &= ~M4_BACKEND_FLAG_Z;
+            if((frag_down_flags & M4_BACKEND_FLAG_B) && (frag_down_flags & M4_BACKEND_FLAG_CLOB)) {
+                needs &= ~M4_BACKEND_FLAG_Y;
+            }
+        }
+    }
+    return needs;
 }
 
 int m4_lit(void * param, m4_stack_t * stack)

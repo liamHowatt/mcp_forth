@@ -1,6 +1,6 @@
-import sys
-from nasm import nasm
-import re
+import subprocess
+import os
+from backend_generator import generate_builtins
 
 """
 eax holds the top stack element
@@ -29,9 +29,8 @@ esi shall point to a struct of:
     32  edi value
     36  runtime word function
     40  callback targets
-    44  callback_array_offset
-    48  special_runtime_cbs
-    52  total_extra_memory_size
+    44  special_runtime_cbs
+    48  total_extra_memory_size
 edx holds the data-space pointer
 """
 
@@ -222,7 +221,7 @@ cmovl eax, ecx
 sub ebx, 4
 
 """), ("2*", (), """
-shl eax, 1
+add eax, eax
 
 """), ("2drop", (), """
 sub ebx, 4
@@ -357,197 +356,33 @@ mov eax, [esp]
 """)
 )
 
-ADD4 = 0
-MVBA = 1
-SUB4 = 2
-MVAB = 3
-CLOB = 4
-
-def assemble(asm):
-    disasm = nasm(asm)
-    instr = tuple(bytes.fromhex(line.split(maxsplit=2)[1].decode())
-                  for line in disasm.splitlines())
-    return instr
-
-class Chore:
-    def __init__(self, normal, regex):
-        assert None is not re.fullmatch(regex, normal)
-        self.normal = normal
-        self.regex = regex
-        instr = assemble(normal)
-        assert len(instr) == 1
-        self.ins = instr[0]
-
-    def two_way_match(self, ins, a):
-        if self.ins == ins:
-            assert None is not re.fullmatch(self.regex, a)
-            return True
-        assert None is re.fullmatch(self.regex, a)
-        return False
-
-flag_macros = (
-    "M4_X86_32_ADD4",
-    "M4_X86_32_MVBA",
-    "M4_X86_32_SUB4",
-    "M4_X86_32_MVAB",
-    "M4_X86_32_CLOB",
+elidables = (
+    ("add ebx, 4",      r" *add +ebx *, *4 *"),
+    ("mov [ebx], eax",  r" *mov *\[ *ebx *\] *, *eax *"),
+    ("mov eax, [ebx]",  r" *mov +eax *, *\[ *ebx *\] *"),
+    ("sub ebx, 4",      r" *sub +ebx *, *4 *"),
 )
 
-stack_chores = (
-    Chore(
-        "add ebx, 4",
-        r"^\s*add\s+ebx\s*,\s*4\s*(;.*|$)",
-    ),
-    Chore(
-        "mov [ebx], eax",
-        r"^\s*mov\s*\[\s*ebx\s*\]\s*,\s*eax\s*(;.*|$)",
-    ),
-    Chore(
-        "sub ebx, 4",
-        r"^\s*sub\s+ebx\s*,\s*4\s*(;.*|$)",
-    ),
-    Chore(
-        "mov eax, [ebx]",
-        r"^\s*mov\s+eax\s*,\s*\[\s*ebx\s*\]\s*(;.*|$)",
-    ),
-)
+def src_to_code(src):
+    src_path = "tmp.s"
+    bin_path = "tmp.bin"
 
-def flag(x):
-    return 1 << x
+    with open(src_path, "w") as f:
+        f.write("[BITS 32]\n")
+        f.write(src)
 
-def non_instr_lines(instr, asm):
-    ins_it = iter(instr)
-    a_it = iter(asm)
-    while True:
-        while True:
-            try:
-                a = next(a_it)
-            except StopIteration:
-                try:
-                    next(ins_it)
-                except StopIteration:
-                    return
-                assert False
-            spl = a.split()
-            if not spl or spl[0][0] in ";.":
-                yield b'', a
-                continue
-            break
-        ins = next(ins_it)
-        yield ins, a
+    subprocess.check_call(("nasm", "-f", "bin", src_path, "-o", bin_path))
 
-def prune_instr_and_get_flags(instr, asm, opts):
-    lines = [list(pair) for pair in non_instr_lines(instr, asm)]
-    flags = 0
-    for i in range(len(lines)):
-        ins, a = lines[i]
-        if not ins:
-            continue
-        if stack_chores[ADD4].two_way_match(ins, a):
-            flags |= flag(ADD4)
-            lines[i][0] = b''
-            i += 1
-            if i < len(lines) and stack_chores[MVBA].two_way_match(*lines[i]):
-                lines[i][0] = b''
-                flags |= flag(MVBA)
-        break
-    for i in reversed(range(len(lines))):
-        ins, a = lines[i]
-        if not ins:
-            continue
-        if stack_chores[SUB4].two_way_match(ins, a):
-            flags |= flag(SUB4)
-            lines[i][0] = b''
-            i -= 1
-            if i >= 0 and stack_chores[MVAB].two_way_match(*lines[i]):
-                lines[i][0] = b''
-                flags |= flag(MVAB)
-        break
+    with open(bin_path, "rb") as f:
+        code = f.read()
 
-    for opt in opts:
-        assert opt == "clobber" and (flags & flag(MVBA)) and not (flags & flag(CLOB))
-        flags |= flag(CLOB)
+    os.unlink(src_path)
+    os.unlink(bin_path)
 
-    return tuple(ins for ins, a in lines), tuple(a for ins, a in lines), flags
-
-def fmt_machine_code_inner(ins, a, s1, ipad, apad, f):
-    if s1 is None:
-        s1 = (', '.join("0x" + hex(b)[2:].zfill(2) for b in ins) + ("," if ins else '')).ljust(ipad if ipad is not None else 0)
-    s2 = a.ljust(apad if apad is not None else 0)
-    print(f'    {s1} /* {s2}  */', file=f)
-
-def fmt_machine_code(num, name, instr, asm, flags, igmax, agmax, f):
-    if flags & flag(CLOB):
-        print(f"/* {name} */ /* clobber */", file=f)
-    else:
-        print(f"/* {name} */", file=f)
-    s_omitted = "/* omitted */ "
-    ipad = max(igmax * 6, len(s_omitted))
-    apad = agmax
-    for ins, a in zip(instr, asm):
-        if not ins and any(None is not re.fullmatch(ch.regex, a) for ch in stack_chores):
-            s1 = s_omitted.ljust(ipad)
-        else:
-            s1 = None
-        fmt_machine_code_inner(ins, a, s1, ipad, apad, f)
-
-def table(results, f):
-    cumulative = 0
-    for i, bi_name, instr, asm, flags in results:
-        n_bytes = sum(map(len, instr))
-        pos = (str(cumulative) + ",").ljust(6)
-        length = (str(n_bytes) + ",").ljust(6)
-        s_flags = " | ".join(macro for i, macro in enumerate(flag_macros) if flag(i) & flags)
-        print(f"    {{{pos} {length}{s_flags}}},", file=f)
-        cumulative += n_bytes
+    return code
 
 def main():
-    results = []
-    for i, (bi_name, opts, asm) in enumerate(builtins):
-        instr = assemble(asm)
-        asm = tuple(asm.splitlines())
-        instr, asm2, flags = prune_instr_and_get_flags(instr, asm, opts)
-        assert asm == asm2
-        results.append((i, bi_name, instr, asm, flags))
-
-    total_machine_code_bytes = sum(sum(map(len, instr)) for _, _, instr, _, _ in results)
-
-    with open("x86-32_backend_generated.c", "w") as f:
-        print(f"""/* generated by {sys.argv[0]} DO NOT EDIT */
-#include "x86-32_backend_generated.h"
-
-const uint8_t m4_x86_32_backend_code[{total_machine_code_bytes}] = {{""", file=f)
-        igmax = max(max(map(len, instr)) for _, _, instr, _, _ in results)
-        agmax = max(max(map(len, asm)) for _, _, _, asm, _ in results)
-        for i, bi_name, instr, asm, flags in results:
-            fmt_machine_code(i, bi_name, instr, asm, flags, igmax, agmax, f)
-
-        print("""};
-""", file=f)
-
-        for i, macro in zip(range(4), flag_macros):
-            print(f"""const uint8_t {macro.lower()}[{len(stack_chores[i].ins)}] = {{""", file=f)
-            fmt_machine_code_inner(stack_chores[i].ins, stack_chores[i].normal, None, None, None, f)
-            print("};", file=f)
-
-        print(f"""
-const struct m4_x86_32_backend_table_entry m4_x86_32_backend_table[{len(builtins)}] = {{""", file=f)
-        table(results, f)
-        print("};", file=f)
-
-    newline = "\n"
-    with open("x86-32_backend_generated.h", "w") as f:
-        print(f"""/* generated by {sys.argv[0]} DO NOT EDIT */
-#pragma once
-#include <stdint.h>
-
-{newline.join(f'#define {macro} {hex(flag(i))}' for i, macro in enumerate(flag_macros))}
-
-{newline.join(f"extern const uint8_t {macro.lower()}[{len(stack_chores[i].ins)}];" for i, macro in zip(range(4), flag_macros))}
-
-extern const uint8_t m4_x86_32_backend_code[{total_machine_code_bytes}];
-struct m4_x86_32_backend_table_entry {{uint16_t pos; uint8_t len; uint8_t flags;}};
-extern const struct m4_x86_32_backend_table_entry m4_x86_32_backend_table[{len(builtins)}];""", file=f)
+    generate_builtins("x86_32", builtins, elidables, src_to_code)
 
 if __name__ == "__main__":
     main()

@@ -12,38 +12,40 @@ typedef int (*callback_target_t)(int arg1, ...);
 
 typedef struct {
     m4_stack_t stack;
+    const m4_runtime_cb_pair_t ** runtime_cbs;
+    const m4_runtime_cb_pair_t * const * special_runtime_cbs;
     uint8_t * memory;
     const uint8_t * data;
     uint8_t * callback_info;
     const uint8_t ** callback_word_locations;
     int * stack_base;
-    void * edi_table;
-    void (*call_runtime_word)(void);
+    int ** variables;
     const callback_target_t * callback_targets;
-    const m4_runtime_cb_pair_t * special_runtime_cbs;
+    const int * literals;
+    int * return_stack;
+    const uint8_t * bin_start;
     int total_extra_memory_size;
 } ctx_t;
 
-void m4_x86_32_engine_run_asm(ctx_t * asm_struct, const uint8_t * program_start);
-void m4_x86_32_engine_call_runtime_word(void);
-int m4_x86_32_engine_callback_target_0(int arg1, ...);
-int m4_x86_32_engine_callback_target_1(int arg1, ...);
-int m4_x86_32_engine_callback_target_2(int arg1, ...);
-int m4_x86_32_engine_callback_target_3(int arg1, ...);
-int m4_x86_32_engine_callback_target_4(int arg1, ...);
-int m4_x86_32_engine_callback_target_5(int arg1, ...);
-int m4_x86_32_engine_callback_target_6(int arg1, ...);
-int m4_x86_32_engine_callback_target_7(int arg1, ...);
+void m4_esp32s3_engine_run_asm(ctx_t * asm_struct, const uint8_t * program_start);
+int m4_esp32s3_engine_callback_target_0(int arg1, ...);
+int m4_esp32s3_engine_callback_target_1(int arg1, ...);
+int m4_esp32s3_engine_callback_target_2(int arg1, ...);
+int m4_esp32s3_engine_callback_target_3(int arg1, ...);
+int m4_esp32s3_engine_callback_target_4(int arg1, ...);
+int m4_esp32s3_engine_callback_target_5(int arg1, ...);
+int m4_esp32s3_engine_callback_target_6(int arg1, ...);
+int m4_esp32s3_engine_callback_target_7(int arg1, ...);
 
 static const callback_target_t callback_targets[MAX_CALLBACKS] = {
-    m4_x86_32_engine_callback_target_0,
-    m4_x86_32_engine_callback_target_1,
-    m4_x86_32_engine_callback_target_2,
-    m4_x86_32_engine_callback_target_3,
-    m4_x86_32_engine_callback_target_4,
-    m4_x86_32_engine_callback_target_5,
-    m4_x86_32_engine_callback_target_6,
-    m4_x86_32_engine_callback_target_7,
+    m4_esp32s3_engine_callback_target_0,
+    m4_esp32s3_engine_callback_target_1,
+    m4_esp32s3_engine_callback_target_2,
+    m4_esp32s3_engine_callback_target_3,
+    m4_esp32s3_engine_callback_target_4,
+    m4_esp32s3_engine_callback_target_5,
+    m4_esp32s3_engine_callback_target_6,
+    m4_esp32s3_engine_callback_target_7,
 };
 
 #ifndef M4_NO_THREAD
@@ -51,7 +53,7 @@ static int thread_extra_stack_space_get(m4_stack_t * stack)
 {
     ctx_t * root = (ctx_t *) stack;
 
-    return sizeof(ctx_t) + STACK_CELL_COUNT * 4 + root->total_extra_memory_size;
+    return sizeof(ctx_t) + STACK_CELL_COUNT * 4 * 2 + root->total_extra_memory_size;
 }
 
 static void * thread_entry(void * arg_void)
@@ -63,7 +65,7 @@ static void * thread_entry(void * arg_void)
     ctx_t * root = (ctx_t *) entry_arg->stack;
     int arg = entry_arg->arg;
     const uint8_t * target = entry_arg->target;
-
+    
     res = sem_post(&entry_arg->done_with_arg_sem);
     assert(res == 0);
 
@@ -81,17 +83,22 @@ static void * thread_entry(void * arg_void)
     c->stack.max = STACK_CELL_COUNT;
     c->stack.len = 0;
 
+    c->return_stack = (int *) memory_p;
+    memory_p += STACK_CELL_COUNT * 4;
+
     /* inherit these from the root */
+    c->runtime_cbs = root->runtime_cbs;
+    c->special_runtime_cbs = root->special_runtime_cbs;
     c->data = root->data;
     c->callback_info = root->callback_info;
     c->callback_word_locations = root->callback_word_locations;
-    c->edi_table = root->edi_table;
-    c->call_runtime_word = root->call_runtime_word;
+    c->variables = root->variables;
     c->callback_targets = root->callback_targets;
-    c->special_runtime_cbs = root->special_runtime_cbs;
-
+    c->literals = root->literals;
+    c->bin_start = root->bin_start;
     assert(root->total_extra_memory_size == m4_bytes_remaining(memory_start, memory_p, memory_len));
     c->total_extra_memory_size = root->total_extra_memory_size;
+
     c->memory = memory_p;
 
     global_thread_t global_thread;
@@ -101,7 +108,7 @@ static void * thread_entry(void * arg_void)
     c->stack.data += 1;
     c->stack.len += 1;
 
-    m4_x86_32_engine_run_asm(c, target);
+    m4_esp32s3_engine_run_asm(c, target);
 
     assert(c->stack.len >= 1);
     return (void *) c->stack.data[-1];
@@ -134,23 +141,26 @@ static int thread_join(void * param, m4_stack_t * stack)
     return 0;
 }
 
-static const m4_runtime_cb_pair_t special_runtime_cbs[] = {
 #ifndef M4_NO_THREAD
-    {m4_engine_thread_create, (void *) &engine_thread_create_param},
+    static const m4_runtime_cb_pair_t thread_create_cb_pair = {m4_engine_thread_create, (void *) &engine_thread_create_param};
 #else
-    {m4_engine_thread_create, NULL},
+    static const m4_runtime_cb_pair_t thread_create_cb_pair = {m4_engine_thread_create, NULL};
 #endif
-    {thread_join, NULL},
+static const m4_runtime_cb_pair_t thread_join_cb_pair = {thread_join, NULL};
+static const m4_runtime_cb_pair_t * const special_runtime_cbs[] = {
+    &thread_create_cb_pair,
+    &thread_join_cb_pair,
 };
 
-int m4_x86_32_engine_run(
+int m4_esp32s3_engine_run(
     const uint8_t * bin,
     const uint8_t * code,
     uint8_t * memory_start,
     int memory_len,
     const m4_runtime_cb_array_t ** cb_arrays,
     const char ** missing_runtime_word_dst
-) {
+)
+{
     int res;
 
     int callbacks_used;
@@ -170,9 +180,9 @@ int m4_x86_32_engine_run(
     c->stack.max = STACK_CELL_COUNT;
     c->stack.len = 0;
 
-    int ** variables;
-    const m4_runtime_cb_pair_t ** runtime_cbs;
-    const uint8_t * program_start;
+    c->return_stack = (int *) memory_p;
+    memory_p += STACK_CELL_COUNT * 4;
+    if(m4_bytes_remaining(memory_start, memory_p, memory_len) < 0) return M4_OUT_OF_MEMORY_ERROR;
 
     int callback_count;
 
@@ -184,28 +194,26 @@ int m4_x86_32_engine_run(
         missing_runtime_word_dst,
         MAX_CALLBACKS - callbacks_used,
         &callback_count,
-        &variables,
-        &runtime_cbs,
+        &c->variables,
+        &c->runtime_cbs,
         &c->data,
         &c->callback_info,
         &c->callback_word_locations,
-        NULL,
-        &program_start,
+        &c->literals,
+        &c->bin_start,
         &c->memory
     );
     if(res) return res;
 
-    if(code) program_start = code;
+    if(code) c->bin_start = code;
 
-    c->edi_table = runtime_cbs - 1;
-    c->call_runtime_word = m4_x86_32_engine_call_runtime_word;
     c->callback_targets = callback_targets + callbacks_used;
     c->special_runtime_cbs = special_runtime_cbs;
     c->total_extra_memory_size = m4_bytes_remaining(memory_start, c->memory, memory_len);
 
     m4_global_main_callbacks_set_ctx(callback_count, c);
 
-    m4_x86_32_engine_run_asm(c, program_start);
+    m4_esp32s3_engine_run_asm(c, c->bin_start);
 
     return 0;
 }

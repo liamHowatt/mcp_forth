@@ -49,7 +49,8 @@ ret
 m4_x86_32_engine_call_runtime_word:
 add ebx, 4
 mov [ebx], eax
-cmp dword [ecx+0], m4_lit
+lea eax, [rel m4_lit]
+cmp dword [ecx+0], eax
 jne .L0
 mov eax, [ecx+4]
 ret
@@ -105,7 +106,6 @@ push ecx                     ; pass ecx as param
 call m4_global_get_ctx
 add esp, 8
 mov ecx, ebx                 ; get the ecx back from ebx
-sub ecx, [eax + 44]          ; make ecx relative to our ctx's callback_array_offset
 
 push edi
 push esi
@@ -114,15 +114,15 @@ mov esi, eax        ; struct
 mov ebx, [esi+0]    ; stack data
 
 mov eax, [esi+20]
-mov al, [eax+ecx]
+movzx eax, byte [eax+ecx]
 push eax
-shr al, 1
+shr eax, 1
 xor edi, edi
 .L0:
 mov edx, [esp+16+4+edi]
 mov [ebx+edi], edx
 add edi, 4
-dec al
+dec eax
 jnz .L0
 add ebx, edi
 
@@ -136,7 +136,7 @@ add ecx, [esi+24]
 call [ecx]
 
 pop ecx
-test cl, 1
+test ecx, 1
 jnz .L1
 add ebx, 4
 mov [ebx], eax

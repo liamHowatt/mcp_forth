@@ -1,5 +1,18 @@
 # mcp_forth
 
+mcp_forth is an embeddable Forth compiler.
+
+## Features
+
+- Native machine code
+- No OS or library dependencies
+- Can call C functions
+- Can create C callbacks
+- Multithreading support
+- Small memory footprint
+
+## Quickstart
+
 `gcc-multilib` needs to be installed (unless OS is 32 bit) to compile `execute-exe` as 32 bit.
 
 ```sh
@@ -51,11 +64,11 @@ Currently supported architectures:
 
 - Interpreted bytecode VM (explained above)
 - x86-32
+- Xtensa (ESP32-S3, call8 ABI)
 
 Planned:
 
 - ARM Thumb (Cortex M0+)
-- Xtensa (LX6, i.e. ESP32)
 
 ## 32 Bits
 
@@ -79,42 +92,3 @@ VM runtime because they have no support for 32 bit programs. An emulator such as
   the runtime.
 - Gforth's "compile time only words" can be used outside of functions in mcp-forth.
 - `UNLOOP` is not required and is a no-op
-
-## Minutia
-
-### Iterative "Fragment Solving"
-
-Fragments aka snippets of machine code have variable sizes depending on their operands. If a jump
-instruction jumps somewhere nearby, it may only use 1 byte to encode the offset, otherwise 4 bytes.
-Literal values are similar. An immediate literal may be loaded into a register differently
-depending on its size. Some architectures require multiple instructions to load larger immediate
-literal values.
-
-Given that the jump distance may not be known at the time of a jump fragment's creation, the
-collection of all fragments at the end of compilation must be solved in an iterative way to
-achieve optimal packing.
-
-Question: will iterative solving ever cause the compiler to hang in an infinite loop that it can't solve?
-
-### Optimizing Compiler Memory Usage
-
-The compiler allocates a few arrays which it repeatedly appends elements to during compilation
-and resizes them when their capacities are exceeded. There are no small allocations since the overhead
-of N allocations of a small struct may be greater than an allocated contiguous array of N small structs.
-
-Strings referring to source code tokens are not allocated arrays of bytes.
-They are pointers into the source code and a length.
-
-Since struct references are always being invalidated due to array resizing, struct references
-are stored as array indices instead of pointers.
-
-Question: is it a good or bad idea to reduce memory usage by:
-
-- Storing strings as only a pointer with no length. The strings are whitespace-terminated since they
-  point inside the source code. There is a special case for a string that is the last token in the
-  source with no following whitespace.
-- Extending the previous point, should 16 bit offsets into the source be used instead of 32 bit pointers?
-- For indices into arrays of structs, should 16 bit indices be used instead of 32 bit ints?
-- For a case where less-than-32-bit integer types are used to store offsets, can all the members of
-  an array of offsets be dynamically promoted as needed? The first offset that exceeds 65535 would
-  cause the array to be converted from an array of 16 bit offsets to an array of 32 bit offsets.

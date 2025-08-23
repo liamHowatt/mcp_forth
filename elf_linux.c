@@ -18,12 +18,12 @@ typedef struct {
     } hash;
     char shstrtab[sizeof(SHSTRTAB)];
     char strtab[sizeof(STRTAB)];
-    __attribute__((aligned(0x1000))) m4_elf_content_t cont;
+    __attribute__((aligned(0x1000))) uint8_t cont[];
 } m4_elf_linux_t;
 
 int m4_elf_linux_size(void)
 {
-    return offsetof(m4_elf_linux_t, cont) + sizeof(m4_elf_content_t);
+    return offsetof(m4_elf_linux_t, cont);
 }
 
 void m4_elf_linux(void * aligned_elf_dst, m4_arch_t machine, int bin_len)
@@ -90,8 +90,8 @@ void m4_elf_linux(void * aligned_elf_dst, m4_arch_t machine, int bin_len)
     e->phdrs[2].p_offset = offsetof(m4_elf_linux_t, cont);
     e->phdrs[2].p_vaddr = 0x1000;
     e->phdrs[2].p_paddr = 0x1000;
-    e->phdrs[2].p_filesz = sizeof(m4_elf_content_t) + bin_len;
-    e->phdrs[2].p_memsz = sizeof(m4_elf_content_t) + bin_len;
+    e->phdrs[2].p_filesz = bin_len;
+    e->phdrs[2].p_memsz = bin_len;
     e->phdrs[2].p_flags = PF_X | PF_R;
     e->phdrs[2].p_align = 0x1000;
 
@@ -133,7 +133,7 @@ void m4_elf_linux(void * aligned_elf_dst, m4_arch_t machine, int bin_len)
     e->shdrs[4].sh_flags = SHF_ALLOC | SHF_EXECINSTR;
     e->shdrs[4].sh_addr = 0x1000;
     e->shdrs[4].sh_offset = offsetof(m4_elf_linux_t, cont);
-    e->shdrs[4].sh_size = sizeof(m4_elf_content_t) + bin_len;
+    e->shdrs[4].sh_size = bin_len;
     e->shdrs[4].sh_link = 0;
     e->shdrs[4].sh_info = 0;
     e->shdrs[4].sh_addralign = 4;
@@ -200,7 +200,7 @@ void m4_elf_linux(void * aligned_elf_dst, m4_arch_t machine, int bin_len)
 
     e->symtab[1].st_name = 1;
     e->symtab[1].st_value = 0x1000;
-    e->symtab[1].st_size = sizeof(m4_elf_content_t) + bin_len;
+    e->symtab[1].st_size = bin_len;
     e->symtab[1].st_info = ELF32_ST_INFO(STB_GLOBAL, STT_FUNC);
     e->symtab[1].st_other = STV_DEFAULT;
     e->symtab[1].st_shndx = 4;
@@ -214,6 +214,4 @@ void m4_elf_linux(void * aligned_elf_dst, m4_arch_t machine, int bin_len)
     memcpy(e->shstrtab, SHSTRTAB, sizeof(e->shstrtab));
 
     memcpy(e->strtab, STRTAB, sizeof(e->strtab));
-
-    e->cont.bin_len = bin_len;
 }

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.22.1)
 
 project(lvgl_workspace LANGUAGES C CXX)
 
@@ -18,7 +18,7 @@ add_executable(lvgl_workspace
     ../../../vm_engine.c
     ../../../runtime_io.c
 
-    ../../../x86-32_backend_generated.c
+    ../../../x86_32_backend_generated.c
     ../../../x86-32_backend.c
     ../../../x86-32_engine_asm.o
     ../../../x86-32_engine.c
@@ -27,13 +27,14 @@ add_executable(lvgl_workspace
 # 32 bit
 set_target_properties(lvgl_workspace PROPERTIES COMPILE_OPTIONS "-m32" LINK_FLAGS "-m32")
 
-set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32 -g -Wall -Wextra -fsanitize=address -Wno-unused-parameter -Wno-missing-field-initializers")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32 -g -Wall -Wextra -fsanitize=address -Wno-unused-parameter -Wno-missing-field-initializers")
-set (CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS} -m32 -fsanitize=address -Wno-unused-parameter -Wno-missing-field-initializers")
+set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32 -no-pie -g -Wall -Wextra -fsanitize=address -Wno-unused-parameter -Wno-missing-field-initializers")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32 -no-pie -g -Wall -Wextra -fsanitize=address -Wno-unused-parameter -Wno-missing-field-initializers")
+set (CMAKE_LINKER_FLAGS "${CMAKE_LINKER_FLAGS} -m32 -no-pie -g -fsanitize=address -Wno-unused-parameter -Wno-missing-field-initializers")
 
 target_link_libraries(lvgl_workspace lvgl)
 target_link_libraries(lvgl_workspace pthread)
-target_link_libraries(lvgl_workspace SDL2)
+target_link_libraries(lvgl_workspace X11)
+# target_link_libraries(lvgl_workspace SDL2)
 target_link_libraries(lvgl_workspace m)
 # target_link_libraries(lvgl_workspace lvgl_thorvg)
 # target_link_libraries(lvgl_workspace lvgl_examples)

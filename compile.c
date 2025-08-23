@@ -170,36 +170,6 @@ static void * grow_array_create(int memb_size)
     return arr->data;
 }
 
-// static void grow_array_reserve(void * v_arr_p, int extra)
-// {
-//     void ** v_arr_p2 = v_arr_p;
-//     grow_array_t * arr = *v_arr_p2 - offsetof(grow_array_t, data);
-
-//     int new_len = arr->len + extra;
-//     if(new_len < arr->capacity) {
-//         do {
-//             arr->capacity += arr->capacity / 2;
-//         } while(new_len < arr->capacity);
-
-//         arr = realloc(arr, sizeof(grow_array_t) + arr->capacity * arr->memb_size);
-//         assert(arr);
-//         *v_arr_p2 = arr->data;
-//     }
-// }
-
-// static void grow_array_add(void * v_arr_p, const void * to_add)
-// {
-//     grow_array_reserve(v_arr_p, 1);
-
-//     void ** v_arr_p2 = v_arr_p;
-//     grow_array_t * arr = *v_arr_p2 - offsetof(grow_array_t, data);
-
-//     void * data = arr->data;
-//     memcpy(data + arr->len * arr->memb_size, to_add, arr->memb_size);
-
-//     arr->len ++;
-// }
-
 static void grow_array_add(void * v_arr_p, const void * to_add)
 {
     void ** v_arr_p2 = v_arr_p;
@@ -224,12 +194,6 @@ static int grow_array_get_len(const void * v_arr)
     const grow_array_t * arr = v_arr - offsetof(grow_array_t, data);
     return arr->len;
 }
-
-// static void grow_array_unsafe_set_len(void * v_arr, int len)
-// {
-//     grow_array_t * arr = v_arr - offsetof(grow_array_t, data);
-//     arr->len = len;
-// }
 
 static void grow_array_drop_end(void * v_arr)
 {
@@ -272,7 +236,6 @@ static int create_fragment(m4_fragment_t ** all_fragments, m4_opcode_t op, int p
 {
     m4_fragment_t fragment = {
         .param = param,
-        .position = 0, /* initial guess (bad) */
         .op = op,
         .is_word_fragment = is_word_fragment
     };
@@ -285,6 +248,26 @@ static int sequence_helper(m4_fragment_t ** all_fragments, int ** sequence, m4_o
     int fragment = create_fragment(all_fragments, op, param, is_word_fragment);
     grow_array_add(sequence, &fragment);
     return fragment;
+}
+
+static void update_defined_word_nested_call_param(m4_fragment_t * all_fragments, int * sequence,
+                                                  const m4_backend_t * backend, int defining_word_fragment_i)
+{
+    if(backend->op_uses_lr == NULL) return;
+    int * defining_word_param_p = &all_fragments[defining_word_fragment_i].param;
+    if(*defining_word_param_p & M4_DEFINED_WORD_LOCATION_PARAM_CALLS) return;
+
+    int i = grow_array_get_len(sequence) - 2;
+    while(1) {
+        if(i == defining_word_fragment_i) return;
+        m4_opcode_t op = all_fragments[sequence[i]].op;
+        if(op == M4_OPCODE_EXIT_WORD) return;
+        if(backend->op_uses_lr(op)) {
+            *defining_word_param_p |= M4_DEFINED_WORD_LOCATION_PARAM_CALLS;
+            return;
+        }
+        i--;
+    }
 }
 
 static bool parse_literal(int * literal_out, const char * word, int word_len)
@@ -359,10 +342,25 @@ static bool parse_literal(int * literal_out, const char * word, int word_len)
     return true;
 }
 
+int m4_compiler_literal(m4_compiler_ctx_t * compiler_ctx, int literal_value)
+{
+    int ** literals_p = compiler_ctx;
+    int * literals = *literals_p;
+    int literal_count = grow_array_get_len(literals);
+    for(int i = 0; i < literal_count; i++) {
+        if(literals[i] == literal_value) {
+            return i;
+        }
+    }
+    grow_array_add(literals_p, &literal_value);
+    return literal_count;
+}
+
 int m4_compile(
     const char * source,
     int source_len,
     uint8_t ** bin_out,
+    int * code_offset_out,
     const m4_backend_t * backend,
     int * error_near
 ) {
@@ -378,10 +376,15 @@ int m4_compile(
     nstring_t * variable_nstrings = grow_array_create(sizeof(nstring_t));
     control_flow_t * control_flow_stack = grow_array_create(sizeof(control_flow_t));
     int * defined_words_that_need_callbacks = grow_array_create(sizeof(int));
+    int * literals = grow_array_create(sizeof(int));
 
     source_scanner_t ss = {.cur=source, .end=source+source_len};
 
     bool defining_word = false;
+
+    m4_compiler_ctx_t * compiler_ctx = &literals;
+
+    sequence_helper(&all_fragments, &sequence, M4_OPCODE_ENTRY, 0, defining_word);
 
     /* process source */
     while(next_word(&ss)) {
@@ -445,6 +448,7 @@ int m4_compile(
             RASSERT(0 == grow_array_get_len(control_flow_stack), UNTERMINATED_CONTROL_FLOW_ERROR);
             int defining_word_fragment_i = defined_word_fragments[grow_array_get_len(defined_word_fragments) - 1];
             sequence_helper(&all_fragments, &sequence, M4_OPCODE_EXIT_WORD, defining_word_fragment_i, defining_word);
+            update_defined_word_nested_call_param(all_fragments, sequence, backend, defining_word_fragment_i);
             defining_word = false;
         }
         else if(EQUAL_STRING_LITERAL("exit", ss.word, ss.word_len, false)) {
@@ -454,10 +458,11 @@ int m4_compile(
             arr_len = grow_array_get_len(control_flow_stack);
             for(int i=0; i<arr_len; i++) {
                 if(control_flow_stack[i].type == CONTROL_FLOW_TYPE_DO) {
-                    all_fragments[defining_word_fragment_i].param = 1;
+                    all_fragments[defining_word_fragment_i].param |= M4_DEFINED_WORD_LOCATION_PARAM_LOOPS;
                     break;
                 }
             }
+            update_defined_word_nested_call_param(all_fragments, sequence, backend, defining_word_fragment_i);
         }
         else if(EQUAL_STRING_LITERAL("(", ss.word, ss.word_len, false)) {
             if(defining_word && all_fragments[sequence[grow_array_get_len(sequence) - 1]].op == M4_OPCODE_DEFINED_WORD_LOCATION) {
@@ -713,17 +718,23 @@ int m4_compile(
     }
 
     /* solve fragment lengths and positions */
+    arr_len = grow_array_get_len(sequence);
+    int code_len;
     bool solved = false;
     while(!solved) {
-        solved = true;
-        int position = 0;
-        arr_len = grow_array_get_len(sequence);
+        code_len = 0;
         for(int i=0; i<arr_len; i++) {
-            if(all_fragments[sequence[i]].position != position) {
-                all_fragments[sequence[i]].position = position;
+            all_fragments[sequence[i]].position = code_len;
+            code_len += backend->fragment_bin_size(compiler_ctx, all_fragments, sequence, arr_len, i);
+        }
+
+        solved = true;
+        for(int i=0; i<arr_len; i++) {
+            bool frag_ok = backend->fragment_bin_is_representable(compiler_ctx, all_fragments, sequence, arr_len, i);
+            if(!frag_ok) {
                 solved = false;
+                all_fragments[sequence[i]].relaxation += 1;
             }
-            position += backend->fragment_bin_size(all_fragments, sequence, arr_len, i);
         }
     }
 
@@ -756,11 +767,18 @@ int m4_compile(
     }
     bin_len += callback_info_len;
 
+    arr_len = grow_array_get_len(literals);
+    bin_len += m4_num_encoded_size_from_int(arr_len);
+
     bin_len = M4_ALIGN(bin_len);
-    arr_len = grow_array_get_len(sequence);
-    for(int i=0; i<arr_len; i++) {
-        bin_len += backend->fragment_bin_size(all_fragments, sequence, arr_len, i);
-    }
+
+    bin_len += 4 * arr_len;
+
+    if(code_offset_out) *code_offset_out = bin_len;
+
+    bin_len += code_len;
+
+    bin_len = M4_ALIGN(bin_len);
 
     uint8_t * bin = malloc(bin_len);
     assert(bin);
@@ -768,12 +786,10 @@ int m4_compile(
     uint8_t * bin_p = bin;
 
     arr_len = grow_array_get_len(variable_nstrings);
-    m4_num_encode(arr_len, bin_p);
-    bin_p += m4_num_encoded_size_from_encoded(bin_p);
+    bin_p += m4_num_encode(arr_len, bin_p);
 
     arr_len = grow_array_get_len(runtime_word_nstrings);
-    m4_num_encode(arr_len, bin_p);
-    bin_p += m4_num_encoded_size_from_encoded(bin_p);
+    bin_p += m4_num_encode(arr_len, bin_p);
     for(int i=0; i<arr_len; i++) {
         const char * str = runtime_word_nstrings[i].str;
         int str_len = runtime_word_nstrings[i].len;
@@ -785,8 +801,7 @@ int m4_compile(
         *(bin_p++) = '\0';
     }
 
-    m4_num_encode(data_len, bin_p);
-    bin_p += m4_num_encoded_size_from_encoded(bin_p);
+    bin_p += m4_num_encode(data_len, bin_p);
     arr_len = grow_array_get_len(data_nstrings);
     for(int i=0; i<arr_len; i++) {
         memcpy(bin_p, data_nstrings[i].str, data_nstrings[i].len);
@@ -795,8 +810,7 @@ int m4_compile(
     }
 
     arr_len = grow_array_get_len(defined_words_that_need_callbacks);
-    m4_num_encode(arr_len, bin_p);
-    bin_p += m4_num_encoded_size_from_encoded(bin_p);
+    bin_p += m4_num_encode(arr_len, bin_p);
     for(int i=0; i<arr_len; i++) {
         m4_fragment_t * fragment = &all_fragments[defined_word_fragments[defined_words_that_need_callbacks[i]]];
         int ext_param = fragment->ext_param;
@@ -804,22 +818,31 @@ int m4_compile(
         params_info <<= 1;
         if(ext_param & 0x60) params_info |= 1;
         *(bin_p++) = params_info;
-        m4_num_encode(fragment->position, bin_p);
-        bin_p += m4_num_encoded_size_from_encoded(bin_p);
+        bin_p += m4_num_encode(fragment->position, bin_p);
     }
 
+    arr_len = grow_array_get_len(literals);
+    bin_p += m4_num_encode(arr_len, bin_p);
+
+    /* 32-bit aligned from here, onward */
     while((uintptr_t)bin_p % 4) *(bin_p++) = 0;
+
+    memcpy(bin_p, literals, 4 * arr_len);
+    bin_p += 4 * arr_len;
+
     arr_len = grow_array_get_len(sequence);
     for(int i=0; i<arr_len; i++) {
-        backend->fragment_bin_dump(all_fragments, sequence, arr_len, i, bin_p);
-        bin_p += backend->fragment_bin_size(all_fragments, sequence, arr_len, i);
+        backend->fragment_bin_dump(compiler_ctx, all_fragments, sequence, arr_len, i, bin_p);
+        bin_p += backend->fragment_bin_size(compiler_ctx, all_fragments, sequence, arr_len, i);
     }
+    while((uintptr_t)bin_p % 4) *(bin_p++) = 0;
 
     *bin_out = bin;
     ret = bin_len;
 end:
     if(error_near) *error_near = ss.word - source;
 
+    grow_array_destroy(literals);
     grow_array_destroy(defined_words_that_need_callbacks);
     grow_array_destroy(control_flow_stack);
     grow_array_destroy(variable_nstrings);

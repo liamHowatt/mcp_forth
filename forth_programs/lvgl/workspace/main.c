@@ -10,7 +10,7 @@ static_assert(sizeof(int) == sizeof(void *), "expected a 32 bit system");
 
 #define ARRAY_LEN(arr) (sizeof(arr) / sizeof(*(arr)))
 
-#define USE_BACKEND_X86 0
+#define USE_BACKEND_X86 1
 
 static char * full_file_name(lv_obj_t * file_explorer)
 {
@@ -51,9 +51,9 @@ static void file_explorer_event_handler(lv_event_t * e)
     uint8_t * binary;
     int error_near;
 #if USE_BACKEND_X86
-    int binary_len = m4_compile(source, source_len, &binary, &m4_x86_32_backend, &error_near);
+    int binary_len = m4_compile(source, source_len, &binary, NULL, &m4_x86_32_backend, &error_near);
 #else
-    int binary_len = m4_compile(source, source_len, &binary, &m4_compact_bytecode_vm_backend, &error_near);
+    int binary_len = m4_compile(source, source_len, &binary, NULL, &m4_compact_bytecode_vm_backend, &error_near);
 #endif
     free(source);
     if(binary_len < 0) {
@@ -86,7 +86,7 @@ static void file_explorer_event_handler(lv_event_t * e)
     int res = m4_vm_engine_run(
 #endif
         mapping,
-        binary_len,
+        NULL,
         memory,
         4096,
         cbs,
@@ -113,15 +113,18 @@ int main()
     lv_init();
 
     LV_IMAGE_DECLARE(mouse_cursor_icon);
-    lv_display_t * display = lv_sdl_window_create(512, 512);
-    LV_UNUSED(display);
 
-    lv_sdl_keyboard_create();
-    lv_indev_t * mouse = lv_sdl_mouse_create();
-    lv_sdl_mousewheel_create();
-    lv_obj_t * cursor_img = lv_image_create(lv_screen_active());
-    lv_image_set_src(cursor_img, &mouse_cursor_icon);
-    lv_indev_set_cursor(mouse, cursor_img);
+    // lv_display_t * display = lv_sdl_window_create(512, 512);
+    // LV_UNUSED(display);
+    // lv_sdl_keyboard_create();
+    // lv_indev_t * mouse = lv_sdl_mouse_create();
+    // lv_sdl_mousewheel_create();
+    // lv_obj_t * cursor_img = lv_image_create(lv_screen_active());
+    // lv_image_set_src(cursor_img, &mouse_cursor_icon);
+    // lv_indev_set_cursor(mouse, cursor_img);
+
+    lv_display_t * display = lv_x11_window_create("mcp_forth", 512, 512);
+    lv_x11_inputs_create(display, &mouse_cursor_icon);
 
     lv_obj_t * file_explorer = lv_file_explorer_create(lv_screen_active());
     lv_file_explorer_open_dir(file_explorer, "A:");

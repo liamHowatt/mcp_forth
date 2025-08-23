@@ -42,7 +42,7 @@ int main(int argc, char ** argv)
 
     uint8_t * bin;
     int error_near = -1;
-    int bin_len = m4_compile(source, source_len, &bin, backend, &error_near);
+    int bin_len = m4_compile(source, source_len, &bin, NULL, backend, &error_near);
     free(source);
     if(bin_len < 0) {
         printf("error %d near %d\n", bin_len, error_near);

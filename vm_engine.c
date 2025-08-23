@@ -4,12 +4,7 @@
 
 #ifndef M4_NO_THREAD
     #include <pthread.h>
-    #include <semaphore.h>
     #include <alloca.h>
-    _Static_assert(sizeof(pthread_t) == 4);
-    #ifdef __NuttX__
-        #include <sched.h> /* struct sched_param */
-    #endif
 #endif
 
 #define STACK_CELL_COUNT 100
@@ -50,21 +45,10 @@ typedef struct {
     int total_extra_memory_size;
 } ctx_t;
 
-#ifndef M4_NO_THREAD
-    typedef struct {
-        sem_t done_with_arg_sem;
-        ctx_t * root;
-        int arg;
-        const uint8_t * target;
-        int memory_len;
-    } thread_entry_arg_t;
-#endif
-
 static int run_inner(ctx_t * c);
 
 static int pc_step(const uint8_t ** pc_p) {
-    int ret = m4_num_decode(*pc_p);
-    *pc_p += m4_num_encoded_size_from_encoded(*pc_p);
+    int ret = m4_num_decode(*pc_p, pc_p);
     return ret;
 }
 
@@ -129,19 +113,28 @@ static int (*const callback_targets[MAX_CALLBACKS])(int arg1, ...) = {
 };
 
 #ifndef M4_NO_THREAD
+static int thread_extra_stack_space_get(m4_stack_t * stack)
+{
+    ctx_t * root = (ctx_t *) stack;
+    
+    return sizeof(ctx_t) + STACK_CELL_COUNT * 4 + RETURN_STACK_CELL_COUNT * 4
+           + root->total_extra_memory_size;
+}
+
 static void * thread_entry(void * arg_void)
 {
     int res;
 
-    thread_entry_arg_t * entry_arg = arg_void;
+    m4_engine_thread_entry_arg_t * entry_arg = arg_void;
 
-    ctx_t * root = entry_arg->root;
+    ctx_t * root = (ctx_t *) entry_arg->stack;
     int arg = entry_arg->arg;
     const uint8_t * target = entry_arg->target;
-    int memory_len = entry_arg->memory_len;
-    
+
     res = sem_post(&entry_arg->done_with_arg_sem);
     assert(res == 0);
+
+    int memory_len = thread_extra_stack_space_get((m4_stack_t *) root);
 
     uint8_t * memory_start = alloca(memory_len);
     uint8_t * memory_p = memory_start;
@@ -195,64 +188,10 @@ static void * thread_entry(void * arg_void)
     return (void *) retval;
 }
 
-static pthread_t thread_create(ctx_t * root, int arg, int prio_change, const uint8_t * target)
-{
-    int res;
-
-    pthread_attr_t attr;
-    res = pthread_attr_init(&attr);
-    assert(res == 0);
-
-    size_t default_stack_size;
-    res = pthread_attr_getstacksize(&attr, &default_stack_size);
-    assert(res == 0);
-    int memory_len = sizeof(ctx_t) + STACK_CELL_COUNT * 4 + RETURN_STACK_CELL_COUNT * 4
-                      + root->total_extra_memory_size;
-    res = pthread_attr_setstacksize(&attr, default_stack_size + memory_len);
-    assert(res == 0);
-
-    res = pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
-    assert(res == 0);
-
-    int this_policy;
-    struct sched_param this_sched_param;
-    res = pthread_getschedparam(pthread_self(), &this_policy, &this_sched_param);
-    assert(res == 0);
-
-    this_sched_param.sched_priority += prio_change;
-
-    res = pthread_attr_setschedpolicy(&attr, this_policy);
-    assert(res == 0);
-    res = pthread_attr_setschedparam(&attr, &this_sched_param);
-    assert(res == 0);
-
-    res = pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
-    assert(res == 0);
-
-    thread_entry_arg_t entry_arg;
-    entry_arg.root = root;
-    entry_arg.arg = arg;
-    entry_arg.target = target;
-    entry_arg.memory_len = memory_len;
-
-    res = sem_init(&entry_arg.done_with_arg_sem, 0, 0);
-    assert(res == 0);
-
-    pthread_t thread;
-    res = pthread_create(&thread, &attr, thread_entry, &entry_arg);
-    assert(res == 0);
-
-    res = pthread_attr_destroy(&attr);
-    assert(res == 0);
-
-    /* don't let `entry_arg` go out of scope until the new thread is done with it */
-    res = sem_wait(&entry_arg.done_with_arg_sem);
-    assert(res == 0);
-    res = sem_destroy(&entry_arg.done_with_arg_sem);
-    assert(res == 0);
-
-    return thread;
-}
+static const m4_engine_thread_create_param_t engine_thread_create_param = {
+    .extra_stack_space_get_cb = thread_extra_stack_space_get,
+    .thread_entry = thread_entry,
+};
 #endif
 
 static int run_inner(ctx_t * c) {
@@ -794,12 +733,8 @@ static int run_inner(ctx_t * c) {
             }
 #ifndef M4_NO_THREAD
             case M4_OPCODE_THREAD_CREATE: {
-                int arg, prio_change, target;
-                POP(&target);
-                POP(&prio_change);
-                POP(&arg);
-                int thread_hdl = (int) thread_create(c, arg, prio_change, (const uint8_t *) target);
-                PUSH(thread_hdl);
+                int res = m4_engine_thread_create((void *) &engine_thread_create_param, (m4_stack_t *) c);
+                assert(res == 0);
                 break;
             }
             case M4_OPCODE_THREAD_JOIN: {
@@ -824,7 +759,7 @@ static int run_inner(ctx_t * c) {
 
 int m4_vm_engine_run(
     const uint8_t * bin,
-    int bin_len,
+    const uint8_t * code,
     uint8_t * memory_start,
     int memory_len,
     const m4_runtime_cb_array_t ** cb_arrays,
@@ -863,7 +798,6 @@ int m4_vm_engine_run(
 
     res = m4_unpack_binary_header(
         bin,
-        bin_len,
         memory_p,
         m4_bytes_remaining(memory_start, memory_p, memory_len),
         cb_arrays,
@@ -875,10 +809,13 @@ int m4_vm_engine_run(
         &c->data_start,
         &c->callback_info,
         &c->callback_word_locations,
+        NULL,
         &c->pc,
         &c->memory
     );
     if(res) return res;
+
+    if(code) c->pc = code;
 
     c->total_extra_memory_size = m4_bytes_remaining(memory_start, c->memory, memory_len);
 

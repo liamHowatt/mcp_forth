@@ -20,7 +20,6 @@ int main(int argc, char ** argv)
 
     m4_engine_run_t run_command;
 
-    int bin_len;
     void * bin;
     void * dl_handle;
     if(0 == strcmp("vm", argv[1])) {
@@ -32,7 +31,7 @@ int main(int argc, char ** argv)
         struct stat statbuf;
         res = fstat(fd, &statbuf);
         assert(res == 0);
-        bin_len = statbuf.st_size;
+        int bin_len = statbuf.st_size;
 
         bin = malloc(bin_len);
         assert(bin);
@@ -53,11 +52,8 @@ int main(int argc, char ** argv)
 
         free(abs_path);
 
-        m4_elf_content_t * cont = dlsym(dl_handle, "cont");
-        assert(cont);
-
-        bin_len = cont->bin_len;
-        bin = cont->bin;
+        bin = dlsym(dl_handle, "cont");
+        assert(bin);
     }
     else {
         assert(0);
@@ -77,7 +73,7 @@ int main(int argc, char ** argv)
     const char * missing_word;
     res = run_command(
         bin,
-        bin_len,
+        NULL,
         memory,
         sizeof(memory),
         cbs,
