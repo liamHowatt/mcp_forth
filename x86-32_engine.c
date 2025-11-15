@@ -114,7 +114,7 @@ static const m4_engine_thread_create_param_t engine_thread_create_param = {
 
 #else /*M4_NO_THREAD*/
 
-static int m4_engine_thread_create(void * param, m4_stack_t * stack)
+int m4_engine_thread_create(void * param, m4_stack_t * stack)
 {
     assert(0);
 }
