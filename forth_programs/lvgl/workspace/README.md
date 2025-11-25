@@ -4,7 +4,7 @@
 
 This project leverages an intensive binding generation tool in LVGL.
 A JSON of the public LVGL API is generated and then the script
-`lvgl_json.jq` generates a binding array for mcp-forth.
+`lvgl_json.py` generates a binding array for mcp-forth.
 
 ```shell
 make -C ../../.. all
