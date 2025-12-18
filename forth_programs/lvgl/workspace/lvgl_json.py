@@ -37,6 +37,12 @@ def main():
 
         print(f'    {{"{trimmed_name.lower()}", {{m4_lit, (void *) sizeof({trimmed_name})}}}},')
 
+        for field in structure["fields"]:
+            field_name = field["name"]
+            bitsize = field["bitsize"]
+            if bitsize is None:
+                print(f'    {{"{trimmed_name.lower()}.{field_name.lower()}", {{m4_lit, (void *) offsetof({trimmed_name}, {field_name})}}}},')
+
     initializer_re = re.compile(r"\(?([0-9]|LV_)")
 
     for macro in lvgl["macros"]:
@@ -59,6 +65,7 @@ def main():
 start = """#include <mcp/mcp_forth.h>
 #include "lvgl/lvgl.h"
 #include "runtime_lvgl.h"
+#include <stddef.h>
 
 static int m4_fc0(void * param, m4_stack_t * stack)
 {

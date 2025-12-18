@@ -17,15 +17,6 @@
 #define RETURN_POP(var)  do { int ret; if((ret = pop((int *) (var), &c->return_stack))) return ret; } while(0)
 #define RETURN_PUSH(var) do { int ret; if((ret = push((int) (var), &c->return_stack))) return ret; } while(0)
 
-#define CALLBACK_TARGET_NAME(number) callback_target_ ## number
-#define CALLBACK_TARGET_DEFINE(number) static int CALLBACK_TARGET_NAME(number)(int arg1, ...) { \
-    va_list ap; \
-    va_start(ap, arg1); \
-    int ret = callback_handle(number, arg1, ap); \
-    va_end(ap); \
-    return ret; \
-}
-
 union iu {int i; unsigned u;};
 
 typedef struct {
@@ -92,25 +83,9 @@ static int callback_handle(int cb_i, int arg1, va_list ap)
     return ret; /* uninitialized is ok */
 }
 
-CALLBACK_TARGET_DEFINE(0)
-CALLBACK_TARGET_DEFINE(1)
-CALLBACK_TARGET_DEFINE(2)
-CALLBACK_TARGET_DEFINE(3)
-CALLBACK_TARGET_DEFINE(4)
-CALLBACK_TARGET_DEFINE(5)
-CALLBACK_TARGET_DEFINE(6)
-CALLBACK_TARGET_DEFINE(7)
-
-static int (*const callback_targets[MAX_CALLBACKS])(int arg1, ...) = {
-    CALLBACK_TARGET_NAME(0),
-    CALLBACK_TARGET_NAME(1),
-    CALLBACK_TARGET_NAME(2),
-    CALLBACK_TARGET_NAME(3),
-    CALLBACK_TARGET_NAME(4),
-    CALLBACK_TARGET_NAME(5),
-    CALLBACK_TARGET_NAME(6),
-    CALLBACK_TARGET_NAME(7),
-};
+#define MCP_FORTH_GENERATED_VM_ENGINE
+#include "mcp_forth_generated.h"
+#undef MCP_FORTH_GENERATED_VM_ENGINE
 
 #ifndef M4_NO_THREAD
 static int thread_extra_stack_space_get(m4_stack_t * stack)
@@ -628,6 +603,22 @@ static int run_inner(ctx_t * c) {
                         PUSH(a);
                         break;
                     }
+                    case 61: { /* w, */
+                        if(m4_bytes_remaining(c->memory_base, c->memory, c->memory_len) < 2) {
+                            return M4_OUT_OF_MEMORY_ERROR;
+                        }
+                        int x;
+                        POP(&x);
+                        *(uint16_t *) c->memory = x;
+                        c->memory += 2;
+                        break;
+                    }
+                    case 62: { /* neg */
+                        int x;
+                        POP(&x);
+                        PUSH(-x);
+                        break;
+                    }
                     default:
                         assert(0);
                 }
@@ -762,7 +753,7 @@ int m4_vm_engine_run(
     const uint8_t * code,
     uint8_t * memory_start,
     int memory_len,
-    const m4_runtime_cb_array_t ** cb_arrays,
+    const m4_runtime_cb_array_t * const * cb_arrays,
     const char ** missing_runtime_word_dst
 ) {
     int res;
@@ -802,7 +793,7 @@ int m4_vm_engine_run(
         m4_bytes_remaining(memory_start, memory_p, memory_len),
         cb_arrays,
         missing_runtime_word_dst,
-        MAX_CALLBACKS - callbacks_used,
+        M4_MAX_CALLBACKS - callbacks_used,
         &callback_count,
         (int ***) &c->variables_and_constants,
         &c->runtime_cbs,

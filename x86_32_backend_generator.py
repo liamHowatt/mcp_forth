@@ -353,6 +353,15 @@ add ebx, 4
 mov [ebx], eax
 mov eax, [esp]
 
+"""), ("w,", (), """
+mov [edx], ax
+add edx, 2
+mov eax, [ebx]
+sub ebx, 4
+
+"""), ("negate", (), """
+neg eax
+
 """)
 )
 

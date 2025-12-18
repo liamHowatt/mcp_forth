@@ -1,8 +1,9 @@
+/*.phony
+/mcp_forth_generated.*
 /compile-exe
 /execute-exe
 /*.bin
-/*_backend_generated.c
-/*_backend_generated.h
+/*_backend_generated.*
 /x86-32_engine_asm.o
 /__pycache__
 /tmp.*

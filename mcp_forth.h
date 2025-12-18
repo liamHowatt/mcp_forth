@@ -5,6 +5,20 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stddef.h>
+
+typedef struct {int * data; int max; int len;} m4_stack_t;
+
+#ifdef __has_include
+    #if !__has_include("mcp_forth_generated.h")
+        #error run mcp_forth_generator.py to generate mcp_forth_generated.h
+    #endif
+#endif
+#define MCP_FORTH_GENERATED_DEFINES
+#define MCP_FORTH_GENERATED_MCP_FORTH_DECLARATION
+#include "mcp_forth_generated.h"
+#undef MCP_FORTH_GENERATED_DEFINES
+#undef MCP_FORTH_GENERATED_MCP_FORTH_DECLARATION
+
 #ifndef M4_NO_THREAD
     #include <semaphore.h>
 #endif
@@ -103,7 +117,6 @@ int m4_num_encoded_size_from_encoded(const uint8_t * src);
 int m4_num_decode(const uint8_t * src, const uint8_t ** new_src);
 #define M4_NUM_MAX_ONE_BYTE 63
 
-typedef struct {int * data; int max; int len;} m4_stack_t;
 typedef int (*m4_runtime_cb)(void * param, m4_stack_t * stack);
 typedef struct {m4_runtime_cb cb; void * param;} m4_runtime_cb_pair_t;
 typedef struct {const char * name; m4_runtime_cb_pair_t cb_pair;} m4_runtime_cb_array_t;
@@ -112,7 +125,7 @@ typedef int m4_engine_run_proto_t(
     const uint8_t * code,
     uint8_t * memory_start,
     int memory_len,
-    const m4_runtime_cb_array_t ** cb_arrays,
+    const m4_runtime_cb_array_t * const * cb_arrays,
     const char ** missing_runtime_word_dst
 );
 typedef m4_engine_run_proto_t * m4_engine_run_t;
@@ -154,7 +167,7 @@ int m4_unpack_binary_header(
     const uint8_t * bin,
     uint8_t * memory_start,
     int memory_len,
-    const m4_runtime_cb_array_t ** cb_arrays,
+    const m4_runtime_cb_array_t * const * cb_arrays,
     const char ** missing_runtime_word_dst,
     int max_callbacks,
     int * callback_count_dst,
@@ -178,26 +191,6 @@ void m4_elf_nuttx(void * aligned_elf_dst, m4_arch_t machine, int cont_len, int c
 
 int m4_lit(void * param, m4_stack_t * stack);
 int m4_f00(void * param, m4_stack_t * stack);
-int m4_f01(void * param, m4_stack_t * stack);
-int m4_f02(void * param, m4_stack_t * stack);
-int m4_f03(void * param, m4_stack_t * stack);
-int m4_f04(void * param, m4_stack_t * stack);
-int m4_f05(void * param, m4_stack_t * stack);
-int m4_f06(void * param, m4_stack_t * stack);
-int m4_f07(void * param, m4_stack_t * stack);
-int m4_f08(void * param, m4_stack_t * stack);
-int m4_f09(void * param, m4_stack_t * stack);
-int m4_f010(void * param, m4_stack_t * stack);
 int m4_f10(void * param, m4_stack_t * stack);
-int m4_f11(void * param, m4_stack_t * stack);
-int m4_f12(void * param, m4_stack_t * stack);
-int m4_f13(void * param, m4_stack_t * stack);
-int m4_f14(void * param, m4_stack_t * stack);
-int m4_f15(void * param, m4_stack_t * stack);
-int m4_f16(void * param, m4_stack_t * stack);
-int m4_f17(void * param, m4_stack_t * stack);
-int m4_f18(void * param, m4_stack_t * stack);
-int m4_f19(void * param, m4_stack_t * stack);
-int m4_f110(void * param, m4_stack_t * stack);
 int m4_f0x(void * param, m4_stack_t * stack);
 int m4_f1x(void * param, m4_stack_t * stack);

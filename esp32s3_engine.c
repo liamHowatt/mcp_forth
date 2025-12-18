@@ -28,25 +28,10 @@ typedef struct {
 } ctx_t;
 
 void m4_esp32s3_engine_run_asm(ctx_t * asm_struct, const uint8_t * program_start);
-int m4_esp32s3_engine_callback_target_0(int arg1, ...);
-int m4_esp32s3_engine_callback_target_1(int arg1, ...);
-int m4_esp32s3_engine_callback_target_2(int arg1, ...);
-int m4_esp32s3_engine_callback_target_3(int arg1, ...);
-int m4_esp32s3_engine_callback_target_4(int arg1, ...);
-int m4_esp32s3_engine_callback_target_5(int arg1, ...);
-int m4_esp32s3_engine_callback_target_6(int arg1, ...);
-int m4_esp32s3_engine_callback_target_7(int arg1, ...);
 
-static const callback_target_t callback_targets[MAX_CALLBACKS] = {
-    m4_esp32s3_engine_callback_target_0,
-    m4_esp32s3_engine_callback_target_1,
-    m4_esp32s3_engine_callback_target_2,
-    m4_esp32s3_engine_callback_target_3,
-    m4_esp32s3_engine_callback_target_4,
-    m4_esp32s3_engine_callback_target_5,
-    m4_esp32s3_engine_callback_target_6,
-    m4_esp32s3_engine_callback_target_7,
-};
+#define MCP_FORTH_GENERATED_ESP32S3_ENGINE
+#include "mcp_forth_generated.h"
+#undef MCP_FORTH_GENERATED_ESP32S3_ENGINE
 
 #ifndef M4_NO_THREAD
 static int thread_extra_stack_space_get(m4_stack_t * stack)
@@ -157,7 +142,7 @@ int m4_esp32s3_engine_run(
     const uint8_t * code,
     uint8_t * memory_start,
     int memory_len,
-    const m4_runtime_cb_array_t ** cb_arrays,
+    const m4_runtime_cb_array_t * const * cb_arrays,
     const char ** missing_runtime_word_dst
 )
 {
@@ -192,7 +177,7 @@ int m4_esp32s3_engine_run(
         m4_bytes_remaining(memory_start, memory_p, memory_len),
         cb_arrays,
         missing_runtime_word_dst,
-        MAX_CALLBACKS - callbacks_used,
+        M4_MAX_CALLBACKS - callbacks_used,
         &callback_count,
         &c->variables,
         &c->runtime_cbs,
@@ -205,7 +190,13 @@ int m4_esp32s3_engine_run(
     );
     if(res) return res;
 
-    if(code) c->bin_start = code;
+    if(code) {
+        for(int i = 0; i < callback_count; i++) {
+            c->callback_word_locations[i] = code + (c->callback_word_locations[i] - c->bin_start);
+        }
+
+        c->bin_start = code;
+    }
 
     c->callback_targets = callback_targets + callbacks_used;
     c->special_runtime_cbs = special_runtime_cbs;

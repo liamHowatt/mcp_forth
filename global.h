@@ -1,6 +1,6 @@
 #pragma once
 
-#define MAX_CALLBACKS 8
+#include "mcp_forth.h"
 
 #ifndef M4_NO_THREAD
     typedef struct {
@@ -13,7 +13,7 @@ typedef struct {
         global_t base;
 #endif
     int callbacks_used;
-    void * ctxs[MAX_CALLBACKS];
+    void * ctxs[M4_MAX_CALLBACKS];
 } global_main_t;
 
 #ifndef M4_NO_THREAD

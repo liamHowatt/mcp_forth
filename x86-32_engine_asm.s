@@ -1,18 +1,17 @@
 [BITS 32]
 
+%include "mcp_forth_generated.mac"
+
 extern m4_global_get_ctx
 extern m4_lit
 
 global m4_x86_32_engine_run_asm
 global m4_x86_32_engine_call_runtime_word
-global m4_x86_32_engine_callback_target_0
-global m4_x86_32_engine_callback_target_1
-global m4_x86_32_engine_callback_target_2
-global m4_x86_32_engine_callback_target_3
-global m4_x86_32_engine_callback_target_4
-global m4_x86_32_engine_callback_target_5
-global m4_x86_32_engine_callback_target_6
-global m4_x86_32_engine_callback_target_7
+%assign i 0
+%rep M4_MAX_CALLBACKS
+global m4_x86_32_engine_callback_target_%+i
+%assign i i+1
+%endrep
 
 
 %macro save_state 1
@@ -72,29 +71,13 @@ mov eax, [ebx+4]
 ret
 
 
-m4_x86_32_engine_callback_target_0:
-xor ecx, ecx
+%assign i 0
+%rep M4_MAX_CALLBACKS
+m4_x86_32_engine_callback_target_%+i:
+mov ecx, i
 jmp callback_handler
-m4_x86_32_engine_callback_target_1:
-mov ecx, 1
-jmp callback_handler
-m4_x86_32_engine_callback_target_2:
-mov ecx, 2
-jmp callback_handler
-m4_x86_32_engine_callback_target_3:
-mov ecx, 3
-jmp callback_handler
-m4_x86_32_engine_callback_target_4:
-mov ecx, 4
-jmp callback_handler
-m4_x86_32_engine_callback_target_5:
-mov ecx, 5
-jmp callback_handler
-m4_x86_32_engine_callback_target_6:
-mov ecx, 6
-jmp callback_handler
-m4_x86_32_engine_callback_target_7:
-mov ecx, 7
+%assign i i+1
+%endrep
 
 callback_handler:
 

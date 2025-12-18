@@ -114,6 +114,8 @@ static const nstring_t builtins[] = {
     NSTRING_LITERAL("min"),
     NSTRING_LITERAL("abs"),
     NSTRING_LITERAL("r@"),
+    NSTRING_LITERAL("w,"),
+    NSTRING_LITERAL("negate"),
 };
 
 static bool next_word(source_scanner_t * ss)

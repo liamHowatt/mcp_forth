@@ -1,18 +1,26 @@
+#define MCP_FORTH_GENERATED_DEFINES
+#include "mcp_forth_generated.h"
+#undef MCP_FORTH_GENERATED_DEFINES
+
 #define M4_ESP32S3_DEFINE_REG_ALIASES
 #include "esp32s3.h"
+
+.altmacro
 
 .extern m4_global_get_ctx
 .extern m4_lit
 
 .globl m4_esp32s3_engine_run_asm
-.globl m4_esp32s3_engine_callback_target_0
-.globl m4_esp32s3_engine_callback_target_1
-.globl m4_esp32s3_engine_callback_target_2
-.globl m4_esp32s3_engine_callback_target_3
-.globl m4_esp32s3_engine_callback_target_4
-.globl m4_esp32s3_engine_callback_target_5
-.globl m4_esp32s3_engine_callback_target_6
-.globl m4_esp32s3_engine_callback_target_7
+
+.macro CALLBACK_TARGET_DECL n
+.globl m4_esp32s3_engine_callback_target_\n
+.endm
+
+.set i, 0
+.rept M4_MAX_CALLBACKS
+CALLBACK_TARGET_DECL %i
+.set i, i+1
+.endr
 
 
 .align 4
@@ -102,46 +110,20 @@ l32i   dt, ds, dso + 4
 
 ret
 
+.macro CALLBACK_TARGET n
+.align 4
+m4_esp32s3_engine_callback_target_\n:
+entry  sp, 48
+movi   a10, \n
+j      callback_handler
+.endm
 
-.align 4
-m4_esp32s3_engine_callback_target_0:
-entry  sp, 48
-movi   a10, 0
-j      callback_handler
-.align 4
-m4_esp32s3_engine_callback_target_1:
-entry  sp, 48
-movi   a10, 1
-j      callback_handler
-.align 4
-m4_esp32s3_engine_callback_target_2:
-entry  sp, 48
-movi   a10, 2
-j      callback_handler
-.align 4
-m4_esp32s3_engine_callback_target_3:
-entry  sp, 48
-movi   a10, 3
-j      callback_handler
-.align 4
-m4_esp32s3_engine_callback_target_4:
-entry  sp, 48
-movi   a10, 4
-j      callback_handler
-.align 4
-m4_esp32s3_engine_callback_target_5:
-entry  sp, 48
-movi   a10, 5
-j      callback_handler
-.align 4
-m4_esp32s3_engine_callback_target_6:
-entry  sp, 48
-movi   a10, 6
-j      callback_handler
-.align 4
-m4_esp32s3_engine_callback_target_7:
-entry  sp, 48
-movi   a10, 7
+.set i, 0
+.rept M4_MAX_CALLBACKS
+CALLBACK_TARGET %i
+.set i, i+1
+.endr
+
 callback_handler:
 
 s32i   a10, sp,  0

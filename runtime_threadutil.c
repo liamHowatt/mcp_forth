@@ -1,6 +1,7 @@
+#include "mcp_forth.h"
+
 #ifndef M4_NO_THREAD
 
-#include "mcp_forth.h"
 #include <pthread.h>
 #include <stdalign.h>
 _Static_assert(alignof(pthread_mutex_t) <= 4);

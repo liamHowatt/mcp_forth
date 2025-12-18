@@ -155,7 +155,7 @@ add.n  ds, ds, n4
 """), ("rshift", (), """
 l32i.n s0, ds, dso
 ssr dt
-sra dt, s0
+srl dt, s0
 add.n  ds, ds, n4
 
 """), ("<", (), """
@@ -365,6 +365,15 @@ abs    dt, dt
 addi.n ds, ds, 4
 s32i.n dt, ds, dso
 l32i.n dt, rs, rso
+
+"""), ("w,", (), """
+s16i   dt, dp, 0
+addi.n dp, dp, 2
+l32i.n dt, ds, dso
+add.n  ds, ds, n4
+
+"""), ("negate", (), """
+neg    dt, dt
 
 """)
 )

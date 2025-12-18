@@ -95,7 +95,7 @@ void m4_global_main_callbacks_set_ctx(int callback_count, void * ctx)
     }
 #endif
 
-    assert(!callback_count || global_main->callbacks_used + callback_count <= MAX_CALLBACKS);
+    assert(!callback_count || global_main->callbacks_used + callback_count <= M4_MAX_CALLBACKS);
     for(int i = 0; i < callback_count; i++) {
         global_main->ctxs[global_main->callbacks_used++] = ctx;
     }
@@ -269,9 +269,9 @@ int m4_unpack_binary_header(
     const uint8_t * bin,
     uint8_t * memory_start,
     int memory_len,
-    const m4_runtime_cb_array_t ** cb_arrays,
+    const m4_runtime_cb_array_t * const * cb_arrays,
     const char ** missing_runtime_word_dst,
-    int max_callbacks,
+    int m4_max_callbacks,
     int * callback_count_dst,
     int *** variables_dst,
     const m4_runtime_cb_pair_t *** runtime_cbs_dst,
@@ -305,7 +305,7 @@ int m4_unpack_binary_header(
     }
     *runtime_cbs_dst = runtime_cbs_p;
     for(int i=0; i<n_runtime_words; i++) {
-        const m4_runtime_cb_array_t ** cb_arrays_p = cb_arrays;
+        const m4_runtime_cb_array_t * const * cb_arrays_p = cb_arrays;
         const m4_runtime_cb_array_t * array_p = *cb_arrays_p;
         while(1) {
             while(!array_p->name) {
@@ -332,7 +332,7 @@ int m4_unpack_binary_header(
 
     int n_callbacks = m4_num_decode(bin_p, &bin_p);
     *callback_count_dst = n_callbacks;
-    if(n_callbacks > max_callbacks) {
+    if(n_callbacks > m4_max_callbacks) {
         return M4_TOO_MANY_CALLBACKS_ERROR;
     }
     uint8_t * callback_info = memory_p;
@@ -413,106 +413,6 @@ int m4_f00(void * param, m4_stack_t * stack)
     return 0;
 }
 
-int m4_f01(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 1)) return M4_STACK_UNDERFLOW_ERROR;
-    void (*func)(int) = param;
-    stack->data -= 1;
-    stack->len -= 1;
-    func(stack->data[0]);
-    return 0;
-}
-
-int m4_f02(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 2)) return M4_STACK_UNDERFLOW_ERROR;
-    void (*func)(int, int) = param;
-    stack->data -= 2;
-    stack->len -= 2;
-    func(stack->data[0], stack->data[1]);
-    return 0;
-}
-
-int m4_f03(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 3)) return M4_STACK_UNDERFLOW_ERROR;
-    void (*func)(int, int, int) = param;
-    stack->data -= 3;
-    stack->len -= 3;
-    func(stack->data[0], stack->data[1], stack->data[2]);
-    return 0;
-}
-
-int m4_f04(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 4)) return M4_STACK_UNDERFLOW_ERROR;
-    void (*func)(int, int, int, int) = param;
-    stack->data -= 4;
-    stack->len -= 4;
-    func(stack->data[0], stack->data[1], stack->data[2], stack->data[3]);
-    return 0;
-}
-
-int m4_f05(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 5)) return M4_STACK_UNDERFLOW_ERROR;
-    void (*func)(int, int, int, int, int) = param;
-    stack->data -= 5;
-    stack->len -= 5;
-    func(stack->data[0], stack->data[1], stack->data[2], stack->data[3], stack->data[4]);
-    return 0;
-}
-
-int m4_f06(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 6)) return M4_STACK_UNDERFLOW_ERROR;
-    void (*func)(int, int, int, int, int, int) = param;
-    stack->data -= 6;
-    stack->len -= 6;
-    func(stack->data[0], stack->data[1], stack->data[2], stack->data[3], stack->data[4], stack->data[5]);
-    return 0;
-}
-
-int m4_f07(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 7)) return M4_STACK_UNDERFLOW_ERROR;
-    void (*func)(int, int, int, int, int, int, int) = param;
-    stack->data -= 7;
-    stack->len -= 7;
-    func(stack->data[0], stack->data[1], stack->data[2], stack->data[3], stack->data[4], stack->data[5], stack->data[6]);
-    return 0;
-}
-
-int m4_f08(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 8)) return M4_STACK_UNDERFLOW_ERROR;
-    void (*func)(int, int, int, int, int, int, int, int) = param;
-    stack->data -= 8;
-    stack->len -= 8;
-    func(stack->data[0], stack->data[1], stack->data[2], stack->data[3], stack->data[4], stack->data[5], stack->data[6], stack->data[7]);
-    return 0;
-}
-
-int m4_f09(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 9)) return M4_STACK_UNDERFLOW_ERROR;
-    void (*func)(int, int, int, int, int, int, int, int, int) = param;
-    stack->data -= 9;
-    stack->len -= 9;
-    func(stack->data[0], stack->data[1], stack->data[2], stack->data[3], stack->data[4], stack->data[5], stack->data[6], stack->data[7], stack->data[8]);
-    return 0;
-}
-
-int m4_f010(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 10)) return M4_STACK_UNDERFLOW_ERROR;
-    void (*func)(int, int, int, int, int, int, int, int, int, int) = param;
-    stack->data -= 10;
-    stack->len -= 10;
-    func(stack->data[0], stack->data[1], stack->data[2], stack->data[3], stack->data[4], stack->data[5], stack->data[6], stack->data[7], stack->data[8], stack->data[9]);
-    return 0;
-}
-
 int m4_f10(void * param, m4_stack_t * stack)
 {
     int (*func)(void) = param;
@@ -524,206 +424,6 @@ int m4_f10(void * param, m4_stack_t * stack)
     return 0;
 }
 
-int m4_f11(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 1)) return M4_STACK_UNDERFLOW_ERROR;
-    int (*func)(int) = param;
-    stack->data -= 1;
-    stack->len -= 1;
-    int y = func(stack->data[0]);
-    if(!(stack->len < stack->max)) return M4_STACK_OVERFLOW_ERROR;
-    stack->data[0] = y;
-    stack->data += 1;
-    stack->len += 1;
-    return 0;
-}
-
-int m4_f12(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 2)) return M4_STACK_UNDERFLOW_ERROR;
-    int (*func)(int, int) = param;
-    stack->data -= 2;
-    stack->len -= 2;
-    int y = func(stack->data[0], stack->data[1]);
-    if(!(stack->len < stack->max)) return M4_STACK_OVERFLOW_ERROR;
-    stack->data[0] = y;
-    stack->data += 1;
-    stack->len += 1;
-    return 0;
-}
-
-int m4_f13(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 3)) return M4_STACK_UNDERFLOW_ERROR;
-    int (*func)(int, int, int) = param;
-    stack->data -= 3;
-    stack->len -= 3;
-    int y = func(stack->data[0], stack->data[1], stack->data[2]);
-    if(!(stack->len < stack->max)) return M4_STACK_OVERFLOW_ERROR;
-    stack->data[0] = y;
-    stack->data += 1;
-    stack->len += 1;
-    return 0;
-}
-
-int m4_f14(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 4)) return M4_STACK_UNDERFLOW_ERROR;
-    int (*func)(int, int, int, int) = param;
-    stack->data -= 4;
-    stack->len -= 4;
-    int y = func(stack->data[0], stack->data[1], stack->data[2], stack->data[3]);
-    if(!(stack->len < stack->max)) return M4_STACK_OVERFLOW_ERROR;
-    stack->data[0] = y;
-    stack->data += 1;
-    stack->len += 1;
-    return 0;
-}
-
-int m4_f15(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 5)) return M4_STACK_UNDERFLOW_ERROR;
-    int (*func)(int, int, int, int, int) = param;
-    stack->data -= 5;
-    stack->len -= 5;
-    int y = func(stack->data[0], stack->data[1], stack->data[2], stack->data[3], stack->data[4]);
-    if(!(stack->len < stack->max)) return M4_STACK_OVERFLOW_ERROR;
-    stack->data[0] = y;
-    stack->data += 1;
-    stack->len += 1;
-    return 0;
-}
-
-int m4_f16(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 6)) return M4_STACK_UNDERFLOW_ERROR;
-    int (*func)(int, int, int, int, int, int) = param;
-    stack->data -= 6;
-    stack->len -= 6;
-    int y = func(stack->data[0], stack->data[1], stack->data[2], stack->data[3], stack->data[4], stack->data[5]);
-    if(!(stack->len < stack->max)) return M4_STACK_OVERFLOW_ERROR;
-    stack->data[0] = y;
-    stack->data += 1;
-    stack->len += 1;
-    return 0;
-}
-
-int m4_f17(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 7)) return M4_STACK_UNDERFLOW_ERROR;
-    int (*func)(int, int, int, int, int, int, int) = param;
-    stack->data -= 7;
-    stack->len -= 7;
-    int y = func(stack->data[0], stack->data[1], stack->data[2], stack->data[3], stack->data[4], stack->data[5], stack->data[6]);
-    if(!(stack->len < stack->max)) return M4_STACK_OVERFLOW_ERROR;
-    stack->data[0] = y;
-    stack->data += 1;
-    stack->len += 1;
-    return 0;
-}
-
-int m4_f18(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 8)) return M4_STACK_UNDERFLOW_ERROR;
-    int (*func)(int, int, int, int, int, int, int, int) = param;
-    stack->data -= 8;
-    stack->len -= 8;
-    int y = func(stack->data[0], stack->data[1], stack->data[2], stack->data[3], stack->data[4], stack->data[5], stack->data[6], stack->data[7]);
-    if(!(stack->len < stack->max)) return M4_STACK_OVERFLOW_ERROR;
-    stack->data[0] = y;
-    stack->data += 1;
-    stack->len += 1;
-    return 0;
-}
-
-int m4_f19(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 9)) return M4_STACK_UNDERFLOW_ERROR;
-    int (*func)(int, int, int, int, int, int, int, int, int) = param;
-    stack->data -= 9;
-    stack->len -= 9;
-    int y = func(stack->data[0], stack->data[1], stack->data[2], stack->data[3], stack->data[4], stack->data[5], stack->data[6], stack->data[7], stack->data[8]);
-    if(!(stack->len < stack->max)) return M4_STACK_OVERFLOW_ERROR;
-    stack->data[0] = y;
-    stack->data += 1;
-    stack->len += 1;
-    return 0;
-}
-
-int m4_f110(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 10)) return M4_STACK_UNDERFLOW_ERROR;
-    int (*func)(int, int, int, int, int, int, int, int, int, int) = param;
-    stack->data -= 10;
-    stack->len -= 10;
-    int y = func(stack->data[0], stack->data[1], stack->data[2], stack->data[3], stack->data[4], stack->data[5], stack->data[6], stack->data[7], stack->data[8], stack->data[9]);
-    if(!(stack->len < stack->max)) return M4_STACK_OVERFLOW_ERROR;
-    stack->data[0] = y;
-    stack->data += 1;
-    stack->len += 1;
-    return 0;
-}
-
-int m4_f0x(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 1)) return M4_STACK_UNDERFLOW_ERROR;
-    stack->data -= 1;
-    stack->len -= 1;
-    switch (stack->data[0]) {
-        case 0:
-            return m4_f00(param, stack);
-        case 1:
-            return m4_f01(param, stack);
-        case 2:
-            return m4_f02(param, stack);
-        case 3:
-            return m4_f03(param, stack);
-        case 4:
-            return m4_f04(param, stack);
-        case 5:
-            return m4_f05(param, stack);
-        case 6:
-            return m4_f06(param, stack);
-        case 7:
-            return m4_f07(param, stack);
-        case 8:
-            return m4_f08(param, stack);
-        case 9:
-            return m4_f09(param, stack);
-        case 10:
-            return m4_f010(param, stack);
-    }
-    return M4_TOO_MANY_VAR_ARGS_ERROR;
-}
-
-int m4_f1x(void * param, m4_stack_t * stack)
-{
-    if(!(stack->len >= 1)) return M4_STACK_UNDERFLOW_ERROR;
-    stack->data -= 1;
-    stack->len -= 1;
-    switch (stack->data[0]) {
-        case 0:
-            return m4_f10(param, stack);
-        case 1:
-            return m4_f11(param, stack);
-        case 2:
-            return m4_f12(param, stack);
-        case 3:
-            return m4_f13(param, stack);
-        case 4:
-            return m4_f14(param, stack);
-        case 5:
-            return m4_f15(param, stack);
-        case 6:
-            return m4_f16(param, stack);
-        case 7:
-            return m4_f17(param, stack);
-        case 8:
-            return m4_f18(param, stack);
-        case 9:
-            return m4_f19(param, stack);
-        case 10:
-            return m4_f110(param, stack);
-    }
-    return M4_TOO_MANY_VAR_ARGS_ERROR;
-}
+#define MCP_FORTH_GENERATED_MCP_FORTH_DEFINITION
+#include "mcp_forth_generated.h"
+#undef MCP_FORTH_GENERATED_MCP_FORTH_DEFINITION

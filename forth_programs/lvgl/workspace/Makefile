@@ -5,4 +5,4 @@ runtime_lvgl.c: lvgl.json lvgl_json.py
 	python3 lvgl_json.py lvgl.json > runtime_lvgl.c
 
 clean:
-	rm -f lvgl.json runtime_lvgl.c
+	rm -rf lvgl.json runtime_lvgl.c build
