@@ -1,6 +1,7 @@
 #include "mcp_forth.h"
 #include <assert.h>
 #include <stdio.h>
+#include <errno.h>
 
 static int rt_assert(void * param, m4_stack_t * stack)
 {
@@ -15,8 +16,9 @@ static int rt_assert_msg(void * param, m4_stack_t * stack)
 {
     if(!(stack->len >= 3)) return M4_STACK_UNDERFLOW_ERROR;
     if(!stack->data[-3]) {
+        int errno_val = errno;
         fwrite((void *)stack->data[-2], 1, stack->data[-1], stderr);
-        putc('\n', stderr);
+        fprintf(stderr, "\nerrno val, if relevant: %d\n", errno_val);
         fflush(stderr);
         assert(0);
     }
