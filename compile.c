@@ -16,6 +16,9 @@
 #define TICK_OPERATOR_COULD_NOT_FIND_DEFINED_WORD_ERROR       -13
 #define INVALID_DEFINED_WORD_PARENTHESIS_FOR_C_CALLBACK_ERROR -14
 
+#define ESCAPED_STRING_ITER_CHAR_ENDED_OK      -1
+#define ESCAPED_STRING_ITER_CHAR_ENDED_EARLY   -2
+
 #define NSTRING_LITERAL(lit) {.str = (lit), .len = sizeof(lit) - 1}
 #define ARRAY_LEN(arr) (sizeof(arr) / sizeof(*(arr)))
 #define EQUAL_STRING_LITERAL(lit, charstar, charstar_len, case_sensitive) ((sizeof(lit) - 1) == (charstar_len) && equal_string((lit), (charstar), sizeof(lit) - 1, case_sensitive))
@@ -118,48 +121,119 @@ static const nstring_t builtins[] = {
     NSTRING_LITERAL("negate"),
 };
 
-static bool next_word(source_scanner_t * ss)
+static bool iter_char_helper(char * dst, const char ** cur, const char * end)
 {
-    const char * p = ss->cur;
+    const char * p = *cur;
+    if(p == end) return false;
+    *dst = *p;
+    p++;
+    *cur = p;
+    return true;
+}
 
+static int escaped_string_iter_char(const char ** cur, const char * end)
+{
     while(1) {
-        if(p == ss->end) {
+        char c;
+        if(!iter_char_helper(&c, cur, end)) return ESCAPED_STRING_ITER_CHAR_ENDED_EARLY;
+        if(c == '"') return ESCAPED_STRING_ITER_CHAR_ENDED_OK;
+        if(c == '\\') {
+            if(!iter_char_helper(&c, cur, end)) return ESCAPED_STRING_ITER_CHAR_ENDED_EARLY;
+            switch(c) {
+                case '\\':
+                case '"':
+                    break;
+                case 'n':
+                    c = '\n';
+                    break;
+                case 'r':
+                    c = '\r';
+                    break;
+                case 't':
+                    c = '\t';
+                    break;
+                case '\n':
+                    continue;
+                default:
+                    *cur -= 1;
+                    c = '\\';
+                    break;
+            }
+        }
+        return (unsigned char) c;
+    }
+}
+
+static void dump_escaped_string(char * dst, const char * src)
+{
+    int iter_res;
+    while((iter_res = escaped_string_iter_char(&src, NULL)) >= 0) {
+        *(dst++) = iter_res;
+    }
+    assert(iter_res == ESCAPED_STRING_ITER_CHAR_ENDED_OK);
+}
+
+static bool equal_escaped_string(const char * s1, const char * s2)
+{
+    while(1) {
+        int s1_iter_res = escaped_string_iter_char(&s1, NULL);
+        int s2_iter_res = escaped_string_iter_char(&s2, NULL);
+        assert(s1_iter_res >= ESCAPED_STRING_ITER_CHAR_ENDED_OK);
+        assert(s2_iter_res >= ESCAPED_STRING_ITER_CHAR_ENDED_OK);
+        if(s1_iter_res == s2_iter_res) {
+            if(s1_iter_res < 0) {
+                return true;
+            }
+        }
+        else {
             return false;
         }
-        char c = *p;
-        if(c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-            p++;
-            continue;
+    }
+}
+
+static bool next_word(source_scanner_t * ss)
+{
+    char c;
+
+    do {
+        if(!iter_char_helper(&c, &ss->cur, ss->end)) {
+            return false;
         }
-        break;
+    } while(c == ' ' || c == '\t' || c == '\n' || c == '\r');
+
+    ss->word = ss->cur - 1;
+    ss->word_len = 1;
+
+    while(
+        iter_char_helper(&c, &ss->cur, ss->end)
+        && !(c == ' ' || c == '\t' || c == '\n' || c == '\r')
+    ) {
+        ss->word_len++;
     }
 
-    ss->word = p;
-    int len = 1;
-
-    p++;
-    while(1) {
-        if(p == ss->end) {
-            break;
-        }
-        char c = *p;
-        p++;
-        if(c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-            break;
-        }
-        len++;
-    }
-    ss->cur = p;
-    ss->word_len = len;
     return true;
 }
 
 static bool next_line(source_scanner_t * ss)
 {
-    while(ss->cur != ss->end && *ss->cur != '\n') ss->cur++;
-    if(ss->cur == ss->end) return false;
-    ss->cur++;
-    return true;
+    while(1) {
+        char c;
+        if(!iter_char_helper(&c, &ss->cur, ss->end)) return false;
+        if(c == '\n') return true;
+    }
+}
+
+static bool next_escaped_string(source_scanner_t * ss)
+{
+    ss->word = ss->cur;
+    ss->word_len = 0;
+
+    int iter_res;
+    while((iter_res = escaped_string_iter_char(&ss->cur, ss->end)) >= 0) {
+        ss->word_len++;
+    }
+
+    return iter_res == ESCAPED_STRING_ITER_CHAR_ENDED_OK;
 }
 
 static void * grow_array_create(int memb_size)
@@ -228,6 +302,16 @@ static int find_nstring(const nstring_t * nstrings, int nstrings_len, const char
 {
     for(int i=0; i<nstrings_len; i++) {
         if(nstrings[i].len == match_len && equal_string(nstrings[i].str, match, match_len, case_sensitive)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int find_nstring_escaped(const nstring_t * nstrings, int nstrings_len, const char * match, int match_len)
+{
+    for(int i=0; i<nstrings_len; i++) {
+        if(nstrings[i].len == match_len && equal_escaped_string(nstrings[i].str, match)) {
             return i;
         }
     }
@@ -500,17 +584,12 @@ int m4_compile(
         else if(EQUAL_STRING_LITERAL(".\"", ss.word, ss.word_len, false) || EQUAL_STRING_LITERAL("s\"", ss.word, ss.word_len, false)) {
             bool is_dot_quote = ss.word[0] == '.';
 
-            const char * string_start = ss.word + 3; /* skip the '." ' */
-            do {
-                RASSERT(next_word(&ss), EARLY_END_OF_SOURCE_ERROR);
-            } while(ss.word[ss.word_len - 1] != '"');
-            int string_len = ss.word - string_start;
-            string_len += ss.word_len - 1; /* Exclude the end '"' */
+            RASSERT(next_escaped_string(&ss), EARLY_END_OF_SOURCE_ERROR);
 
-            int data_i = find_nstring(data_nstrings, grow_array_get_len(data_nstrings), string_start, string_len, true);
+            int data_i = find_nstring_escaped(data_nstrings, grow_array_get_len(data_nstrings), ss.word, ss.word_len);
             if(data_i == -1) {
                 data_i = grow_array_get_len(data_nstrings);
-                nstring_t data_nstring = {.str=string_start, .len=string_len};
+                nstring_t data_nstring = {.str=ss.word, .len=ss.word_len};
                 grow_array_add(&data_nstrings, &data_nstring);
             }
             int data_offset = 0;
@@ -519,7 +598,7 @@ int m4_compile(
             }
 
             sequence_helper(&all_fragments, &sequence, M4_OPCODE_PUSH_DATA_ADDRESS, data_offset, defining_word);
-            sequence_helper(&all_fragments, &sequence, M4_OPCODE_PUSH_LITERAL, string_len, defining_word);
+            sequence_helper(&all_fragments, &sequence, M4_OPCODE_PUSH_LITERAL, ss.word_len, defining_word);
 
             if(is_dot_quote) {
                 int type_i = FIND_NSTRING_LITERAL(runtime_word_nstrings, grow_array_get_len(runtime_word_nstrings), "type", false);
@@ -806,7 +885,7 @@ int m4_compile(
     bin_p += m4_num_encode(data_len, bin_p);
     arr_len = grow_array_get_len(data_nstrings);
     for(int i=0; i<arr_len; i++) {
-        memcpy(bin_p, data_nstrings[i].str, data_nstrings[i].len);
+        dump_escaped_string((char *) bin_p, data_nstrings[i].str);
         bin_p += data_nstrings[i].len;
         *(bin_p++) = '\0';
     }
