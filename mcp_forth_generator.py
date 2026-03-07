@@ -1,6 +1,8 @@
 import sys
+import itertools
 
 LF = '\n'
+SENSITIVE_RETURN_VALUE_ABI = "defined(__i386__)"
 
 max_callbacks = 8
 max_wrapper_args = 10
@@ -97,69 +99,120 @@ defines = f"""\
 
 wrapper_decls = "\n".join(f"""\
 int m4_f0{i}(void * param, m4_stack_t * stack);
-int m4_f1{i}(void * param, m4_stack_t * stack);"""
-    for i in range(1, max_wrapper_args + 1)
+int m4_f1{i}(void * param, m4_stack_t * stack);
+#if {SENSITIVE_RETURN_VALUE_ABI}
+    int m4_fsb{i}(void * param, m4_stack_t * stack);
+    int m4_fub{i}(void * param, m4_stack_t * stack);
+    int m4_fsh{i}(void * param, m4_stack_t * stack);
+    int m4_fuh{i}(void * param, m4_stack_t * stack);
+#else
+    #define m4_fsb{i} m4_f1{i}
+    #define m4_fub{i} m4_f1{i}
+    #define m4_fsh{i} m4_f1{i}
+    #define m4_fuh{i} m4_f1{i}
+#endif
+"""
+    for i in itertools.chain(range(max_wrapper_args + 1), ("x", ))
 )
 
-wrappers = "\n\n".join(f"""\
-int m4_f0{i}(void * param, m4_stack_t * stack)
-{{
-    if(!(stack->len >= {i})) return M4_STACK_UNDERFLOW_ERROR;
-    void (*func)({', '.join('int' for _ in range(i))}) = param;
-    stack->data -= {i};
-    stack->len -= {i};
-    func({', '.join(f'stack->data[{j}]' for j in range(i))});
+WRAPPER_TEMPLATE_F0 = """\
+int m4_f0{{i}}(void * param, m4_stack_t * stack)
+{{{{
+#if {{i}}
+    if(!(stack->len >= {{i}})) return M4_STACK_UNDERFLOW_ERROR;
+#endif
+    void (*func)({{func_ptr_decl_params}}) = param;
+#if {{i}}
+    stack->data -= {{i}};
+    stack->len -= {{i}};
+#endif
+    func({{func_ptr_call_params}});
     return 0;
-}}
+}}}}"""
 
-int m4_f1{i}(void * param, m4_stack_t * stack)
-{{
-    if(!(stack->len >= {i})) return M4_STACK_UNDERFLOW_ERROR;
-    int (*func)({', '.join('int' for _ in range(i))}) = param;
-    stack->data -= {i};
-    stack->len -= {i};
-    int y = func({', '.join(f'stack->data[{j}]' for j in range(i))});
+WRAPPER_TEMPLATE_F1 = """\
+int m4_f{rettype_code}{{i}}(void * param, m4_stack_t * stack)
+{{{{
+#if {{i}}
+    if(!(stack->len >= {{i}})) return M4_STACK_UNDERFLOW_ERROR;
+#endif
+    {rettype} (*func)({{func_ptr_decl_params}}) = param;
+#if {{i}}
+    stack->data -= {{i}};
+    stack->len -= {{i}};
+#endif
+    {rettype} y = func({{func_ptr_call_params}});
     if(!(stack->len < stack->max)) return M4_STACK_OVERFLOW_ERROR;
     stack->data[0] = y;
     stack->data += 1;
     stack->len += 1;
     return 0;
-}}"""
-    for i in range(1, max_wrapper_args + 1)
-)
+}}}}"""
 
-var_arg_wrappers_0_cases = ''.join(f"""
-        case {i}:
-            return m4_f0{i}(param, stack);"""
+WRAPPER_TEMPLATE = f"""\
+{WRAPPER_TEMPLATE_F0.format()}
+
+{WRAPPER_TEMPLATE_F1.format(rettype_code = "1", rettype = "int")}
+
+#if {SENSITIVE_RETURN_VALUE_ABI}
+
+{WRAPPER_TEMPLATE_F1.format(rettype_code = "sb", rettype = "int8_t")}
+
+{WRAPPER_TEMPLATE_F1.format(rettype_code = "ub", rettype = "uint8_t")}
+
+{WRAPPER_TEMPLATE_F1.format(rettype_code = "sh", rettype = "int16_t")}
+
+{WRAPPER_TEMPLATE_F1.format(rettype_code = "uh", rettype = "uint16_t")}
+
+#endif"""
+
+wrappers = "\n\n".join(
+    WRAPPER_TEMPLATE.format(
+        i = i,
+        func_ptr_decl_params = ', '.join('int' for _ in range(i)) if i else "void",
+        func_ptr_call_params = ', '.join(f'stack->data[{j}]' for j in range(i)),
+    )
     for i in range(max_wrapper_args + 1)
 )
-var_arg_wrappers_1_cases = ''.join(f"""
-        case {i}:
-            return m4_f1{i}(param, stack);"""
-    for i in range(max_wrapper_args + 1)
-)
 
-var_arg_wrappers = f"""int m4_f0x(void * param, m4_stack_t * stack)
+var_arg_wrapper_cases = {
+    rettype_code: ''.join(
+        f"""
+        case {i}:
+            return m4_f{rettype_code}{i}(param, stack);"""
+        for i in range(max_wrapper_args + 1)
+    )
+    for rettype_code in ("0", "1", "sb", "ub", "sh", "uh")
+}
+
+VAR_ARG_WRAPPER_TEMPLATE = """\
+int m4_f{rettype_code}x(void * param, m4_stack_t * stack)
 {{
     if(!(stack->len >= 1)) return M4_STACK_UNDERFLOW_ERROR;
     stack->data -= 1;
     stack->len -= 1;
     switch (stack->data[0]) {{\
-{var_arg_wrappers_0_cases}
-    }}
-    return M4_TOO_MANY_VAR_ARGS_ERROR;
-}}
-
-int m4_f1x(void * param, m4_stack_t * stack)
-{{
-    if(!(stack->len >= 1)) return M4_STACK_UNDERFLOW_ERROR;
-    stack->data -= 1;
-    stack->len -= 1;
-    switch (stack->data[0]) {{\
-{var_arg_wrappers_1_cases}
+{cases}
     }}
     return M4_TOO_MANY_VAR_ARGS_ERROR;
 }}"""
+
+var_arg_wrappers = f"""\
+{VAR_ARG_WRAPPER_TEMPLATE.format(rettype_code = "0", cases = var_arg_wrapper_cases["0"])}
+
+{VAR_ARG_WRAPPER_TEMPLATE.format(rettype_code = "1", cases = var_arg_wrapper_cases["1"])}
+
+#if {SENSITIVE_RETURN_VALUE_ABI}
+
+{VAR_ARG_WRAPPER_TEMPLATE.format(rettype_code = "sb", cases = var_arg_wrapper_cases["sb"])}
+
+{VAR_ARG_WRAPPER_TEMPLATE.format(rettype_code = "ub", cases = var_arg_wrapper_cases["ub"])}
+
+{VAR_ARG_WRAPPER_TEMPLATE.format(rettype_code = "sh", cases = var_arg_wrapper_cases["sh"])}
+
+{VAR_ARG_WRAPPER_TEMPLATE.format(rettype_code = "uh", cases = var_arg_wrapper_cases["uh"])}
+
+#endif"""
 
 vm_engine_callback_targets = '\n'.join(f"""\
 static int callback_target_{i}(int arg1, ...) {{

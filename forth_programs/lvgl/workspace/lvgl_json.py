@@ -8,6 +8,28 @@ def main():
     with open(sys.argv[1]) as f:
         lvgl = json.load(f)
 
+    RETURN_TYPE_CODES = {
+        "void": "0",
+
+        "lv_color_t": "c",
+
+        "int8_t": "sb",
+        "char": "sb",
+
+        "uint8_t": "ub",
+        "unsigned char": "ub",
+        "bool": "ub",
+        "lv_opa_t": "ub",
+        "lv_style_prop_t": "ub",
+
+        "int16_t": "sh",
+        "short": "sh",
+
+        "uint16_t": "uh",
+        "unsigned short": "uh",
+        "lv_state_t": "uh",
+    }
+
     print(start)
 
     for enum in lvgl["enums"]:
@@ -20,9 +42,7 @@ def main():
         name = function["name"]
 
         return_type_name = function["type"]["type"].get("name")
-        if return_type_name == "void": return_type_code = 0
-        elif return_type_name == "lv_color_t": return_type_code = "c"
-        else: return_type_code = 1
+        return_type_code = RETURN_TYPE_CODES.get(return_type_name, "1")
 
         args = function["args"]
         if args[0]["type"].get("name") == "void": arg_count_code = 0
@@ -33,6 +53,7 @@ def main():
 
     for structure in lvgl["structures"]:
         name = structure["name"]
+        if name == "_x11_user_hdr_t": continue
         trimmed_name = name.lstrip("_")
 
         print(f'    {{"{trimmed_name.lower()}", {{m4_lit, (void *) sizeof({trimmed_name})}}}},')

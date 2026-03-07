@@ -190,7 +190,3 @@ int m4_elf_nuttx_size(void);
 void m4_elf_nuttx(void * aligned_elf_dst, m4_arch_t machine, int cont_len, int code_len);
 
 int m4_lit(void * param, m4_stack_t * stack);
-int m4_f00(void * param, m4_stack_t * stack);
-int m4_f10(void * param, m4_stack_t * stack);
-int m4_f0x(void * param, m4_stack_t * stack);
-int m4_f1x(void * param, m4_stack_t * stack);

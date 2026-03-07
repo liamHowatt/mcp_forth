@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.22.1)
 
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CCACHE_PROGRAM}")
+endif()
+
 project(lvgl_workspace LANGUAGES C CXX)
 
 include(${CMAKE_CURRENT_LIST_DIR}/../lvgl/CMakeLists.txt)

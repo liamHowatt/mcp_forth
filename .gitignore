@@ -2,6 +2,7 @@
 /mcp_forth_generated.*
 /compile-exe
 /execute-exe
+/num_test
 /*.bin
 /*_backend_generated.*
 /x86-32_engine_asm.o

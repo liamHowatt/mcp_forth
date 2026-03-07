@@ -1,6 +1,6 @@
 # LVGL with mcp_forth
 
-`gcc-multilib` and `libsdl2-dev:i386` needs to be installed (unless OS is 32 bit) to compile as 32 bit for Forth.
+`gcc-multilib` and `libx11-dev:i386` needs to be installed (unless OS is 32 bit) to compile as 32 bit for Forth.
 
 This project leverages an intensive binding generation tool in LVGL.
 A JSON of the public LVGL API is generated and then the script

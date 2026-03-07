@@ -406,24 +406,6 @@ int m4_lit(void * param, m4_stack_t * stack)
     return 0;
 }
 
-int m4_f00(void * param, m4_stack_t * stack)
-{
-    void (*func)(void) = param;
-    func();
-    return 0;
-}
-
-int m4_f10(void * param, m4_stack_t * stack)
-{
-    int (*func)(void) = param;
-    int y = func();
-    if(!(stack->len < stack->max)) return M4_STACK_OVERFLOW_ERROR;
-    stack->data[0] = y;
-    stack->data += 1;
-    stack->len += 1;
-    return 0;
-}
-
 #define MCP_FORTH_GENERATED_MCP_FORTH_DEFINITION
 #include "mcp_forth_generated.h"
 #undef MCP_FORTH_GENERATED_MCP_FORTH_DEFINITION

@@ -304,6 +304,7 @@ static bool fragment_bin_is_representable(m4_compiler_ctx_t * compiler, const m4
                     return true;
             }
             assert(0);
+            return true;
         }
         default:
             return true;

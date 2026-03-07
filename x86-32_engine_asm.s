@@ -48,8 +48,7 @@ ret
 m4_x86_32_engine_call_runtime_word:
 add ebx, 4
 mov [ebx], eax
-lea eax, [rel m4_lit]
-cmp dword [ecx+0], eax
+cmp dword [ecx+0], m4_lit
 jne .L0
 mov eax, [ecx+4]
 ret
