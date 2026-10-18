@@ -198,6 +198,9 @@ int m4_esp32s3_engine_run(
         c->bin_start = code;
     }
 
+    c->callback_info -= callbacks_used;
+    c->callback_word_locations -= callbacks_used;
+
     c->callback_targets = callback_targets + callbacks_used;
     c->special_runtime_cbs = special_runtime_cbs;
     c->total_extra_memory_size = m4_bytes_remaining(memory_start, c->memory, memory_len);

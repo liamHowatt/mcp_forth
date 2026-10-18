@@ -188,6 +188,9 @@ int m4_x86_32_engine_run(
         program_start = code;
     }
 
+    c->callback_info -= callbacks_used;
+    c->callback_word_locations -= callbacks_used;
+
     c->edi_table = runtime_cbs - 1;
     c->call_runtime_word = m4_x86_32_engine_call_runtime_word;
     c->callback_targets = callback_targets + callbacks_used;
